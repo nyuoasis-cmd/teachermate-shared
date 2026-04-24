@@ -11,7 +11,7 @@ TeacherMate 7개 앱 공용 라이브러리 (React 19 + TypeScript).
 }
 ```
 
-## 포함 (9개 export)
+## 포함 (13개 export)
 
 ### 유틸
 - `lib/relative-time.ts` — 상대시간 포맷팅 (`formatRelativeTime`)
@@ -23,10 +23,14 @@ TeacherMate 7개 앱 공용 라이브러리 (React 19 + TypeScript).
 - `components/QRButton.tsx` — QR 공유 버튼 (Primary 스타일 통일)
 - `components/QRFullscreen.tsx` — QR 전체 화면 모달
 - `components/GroupInputPanel.tsx` — 모둠 입력 패널 (합의형 B + 대표자형 A)
+- `components/RetryButton.tsx` — AI 생성 실패 후 재시도 버튼
+- `components/WaitTimer.tsx` — 60~300초 생성 대기 타이머
+- `components/ModerationModal.tsx` — OpenAI Moderation 위반 안내 모달
 
 ### 훅
 - `hooks/useUndoDelete.ts` — headless undo 삭제 훅 (race-safe)
 - `hooks/useGroupInput.ts` — 모둠 입력 헤드리스 훅
+- `hooks/usePolling.ts` — AbortSignal 지원 제네릭 폴링 훅
 
 ---
 
@@ -42,8 +46,12 @@ import {
   QRButton,
   QRFullscreen,
   GroupInputPanel,
+  RetryButton,
+  WaitTimer,
+  ModerationModal,
   useUndoDelete,
   useGroupInput,
+  usePolling,
   formatRelativeTime,
 } from '@teachermate/shared';
 ```
