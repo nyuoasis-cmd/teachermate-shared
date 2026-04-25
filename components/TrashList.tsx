@@ -91,7 +91,6 @@ export function TrashList({
       return;
     }
 
-    const previousItems = items;
     setRestoringIds((current) => [...current, item.id]);
     setItems((current) => current.filter((currentItem) => currentItem.id !== item.id));
 
@@ -115,7 +114,7 @@ export function TrashList({
       onRestore?.(item.id);
       showToast('복구했어요');
     } catch (error) {
-      setItems(previousItems);
+      setItems((current) => (current.some((currentItem) => currentItem.id === item.id) ? current : [...current, item]));
       showToast(error instanceof Error ? error.message : '복구하지 못했어요', 'error');
     } finally {
       setRestoringIds((current) => current.filter((id) => id !== item.id));

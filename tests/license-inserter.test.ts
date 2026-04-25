@@ -1,10 +1,12 @@
 // @vitest-environment jsdom
 
+import { PDFDocument } from 'pdf-lib';
 import piexif from 'piexifjs';
 import { describe, expect, it } from 'vitest';
 import { LICENSE_DEFAULT, buildDownloadName, buildLicenseJson, type LicenseMeta } from '../lib/license-inserter/metadata-common';
 import { embedImageMetadata } from '../lib/license-inserter/image';
 import { buildMp4LicenseArgs } from '../lib/license-inserter/mp4-server';
+import { embedPdfMetadata } from '../lib/license-inserter/pdf';
 
 const TEST_META: LicenseMeta = {
   app: 'meta-character',
@@ -53,10 +55,46 @@ describe('license inserter utilities', () => {
 
   it('buildMp4LicenseArgs includes title, comment, license metadata pairs', () => {
     const args = buildMp4LicenseArgs(TEST_META);
-    expect(args).toContain('-metadata');
+    const metadataCount = args.filter((value) => value === '-metadata').length;
+    expect(metadataCount).toBe(3);
+    expect(args.length).toBe(6);
     expect(args).toContain(`license=${LICENSE_DEFAULT}`);
     expect(args.some((value) => value.startsWith('title='))).toBe(true);
     expect(args.some((value) => value.startsWith('comment='))).toBe(true);
+  });
+
+  it('embedPdfMetadata sets Subject/Keywords/Creator without Producer dependency', async () => {
+    const pdf = await PDFDocument.create();
+    pdf.addPage();
+
+    const sourceBytes = await pdf.save();
+    const sourceBlob = {
+      arrayBuffer: async () => sourceBytes.buffer.slice(sourceBytes.byteOffset, sourceBytes.byteOffset + sourceBytes.byteLength),
+    } as Blob;
+    const embedded = await embedPdfMetadata(sourceBlob, TEST_META);
+    const embeddedBytes = await new Promise<ArrayBuffer>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = () => reject(reader.error);
+      reader.onload = () => {
+        if (!(reader.result instanceof ArrayBuffer)) {
+          reject(new Error('PDF 결과를 읽지 못했어요'));
+          return;
+        }
+        resolve(reader.result);
+      };
+      reader.readAsArrayBuffer(embedded);
+    });
+    const embeddedPdf = await PDFDocument.load(embeddedBytes);
+    const keywords = embeddedPdf.getKeywords();
+
+    expect(embeddedPdf.getSubject()).toContain(LICENSE_DEFAULT);
+    expect(keywords).toContain(TEST_META.app);
+    expect(keywords).toContain(TEST_META.sessionCode);
+    expect(keywords).toContain(LICENSE_DEFAULT);
+    expect(embeddedPdf.getCreator()).toBe(`TeacherMate ${TEST_META.app}`);
+    expect(embeddedPdf.getTitle()).toContain(`${TEST_META.app} · ${TEST_META.sessionCode}`);
+    expect(embeddedPdf.getAuthor()).toBe(TEST_META.studentName);
+    expect(embeddedPdf.getPageCount()).toBeGreaterThanOrEqual(1);
   });
 
   it('embedImageMetadata preserves inserted EXIF values', async () => {

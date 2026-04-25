@@ -44,6 +44,7 @@ export function ReportModal({ open, onClose, targetId, onSubmit }: ReportModalPr
   const [reporterEmail, setReporterEmail] = useState('');
   const [emailError, setEmailError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [hasFailed, setHasFailed] = useState(false);
 
   useEffect(() => {
     if (!open) {
@@ -53,12 +54,13 @@ export function ReportModal({ open, onClose, targetId, onSubmit }: ReportModalPr
       setReporterEmail('');
       setEmailError(null);
       setIsSubmitting(false);
+      setHasFailed(false);
       return;
     }
 
     const originalOverflow = document.body.style.overflow;
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && !isSubmitting) {
+      if (event.key === 'Escape' && (!isSubmitting || hasFailed)) {
         onClose();
       }
     };
@@ -70,7 +72,7 @@ export function ReportModal({ open, onClose, targetId, onSubmit }: ReportModalPr
       document.body.style.overflow = originalOverflow;
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [isSubmitting, onClose, open]);
+  }, [hasFailed, isSubmitting, onClose, open]);
 
   const isSelfHarm = category === 'self-harm';
   const emailRequired = notifyReporter;
@@ -94,6 +96,7 @@ export function ReportModal({ open, onClose, targetId, onSubmit }: ReportModalPr
 
     setEmailError(null);
     setIsSubmitting(true);
+    setHasFailed(false);
 
     try {
       await onSubmit({
@@ -106,8 +109,8 @@ export function ReportModal({ open, onClose, targetId, onSubmit }: ReportModalPr
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : '신고하지 못했어요';
-      showToast(message, 'error');
-      setIsSubmitting(false);
+      showToast(`${message} 다시 시도하려면 창을 닫고 열어주세요`, 'error');
+      setHasFailed(true);
     }
   };
 
@@ -115,7 +118,7 @@ export function ReportModal({ open, onClose, targetId, onSubmit }: ReportModalPr
     <div
       className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 backdrop-blur-sm md:items-center"
       onClick={() => {
-        if (!isSubmitting) {
+        if (!isSubmitting || hasFailed) {
           onClose();
         }
       }}
@@ -128,7 +131,7 @@ export function ReportModal({ open, onClose, targetId, onSubmit }: ReportModalPr
         <button
           type="button"
           aria-label="닫기"
-          disabled={isSubmitting}
+          disabled={isSubmitting && !hasFailed}
           onClick={onClose}
           className="absolute right-4 top-4 inline-flex h-7 w-7 items-center justify-center rounded-full text-stone-400 transition hover:bg-stone-100 disabled:cursor-not-allowed disabled:opacity-50"
         >
@@ -233,7 +236,7 @@ export function ReportModal({ open, onClose, targetId, onSubmit }: ReportModalPr
         <div className="mt-6 flex gap-3">
           <button
             type="button"
-            disabled={isSubmitting}
+            disabled={isSubmitting && !hasFailed}
             onClick={onClose}
             className="h-11 flex-1 rounded-xl border border-stone-200 bg-white text-sm font-medium text-stone-600 transition hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-60"
           >
