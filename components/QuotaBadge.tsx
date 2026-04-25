@@ -20,6 +20,12 @@ export interface QuotaBadgeProps {
   userId: string;
   month?: string;
   fetchEndpoint?: string;
+  /**
+   * 데이터 fetcher 함수 (옵셔널). 호출자가 인증 헤더 등을 포함한 자체 fetch 함수를 주입.
+   * 제공되면 fetchEndpoint 무시하고 fetcher() 결과를 사용.
+   * 주의: useMemo/useCallback 으로 안정화 권장 (deps 변경 시 재실행).
+   */
+  fetcher?: () => Promise<QuotaApiResponse>;
   onLimitReached?: (usage: number, limit: number) => void;
   onClickRequestExpand?: () => void;
 }
@@ -84,6 +90,7 @@ export function QuotaBadge({
   userId,
   month,
   fetchEndpoint = '/api/quota',
+  fetcher,
   onLimitReached,
   onClickRequestExpand,
 }: QuotaBadgeProps) {
@@ -94,10 +101,19 @@ export function QuotaBadge({
 
   useEffect(() => {
     let cancelled = false;
-    const key = `${appName}|${userId}|${resolvedMonth}|${fetchEndpoint}`;
 
     setIsLoading(true);
-    loadQuotaCached(key, appName, userId, resolvedMonth, fetchEndpoint)
+    const promise = fetcher
+      ? fetcher().then(normalizeQuota)
+      : loadQuotaCached(
+          `${appName}|${userId}|${resolvedMonth}|${fetchEndpoint}`,
+          appName,
+          userId,
+          resolvedMonth,
+          fetchEndpoint,
+        );
+
+    promise
       .then((result) => {
         if (cancelled) return;
         setQuota(result);
@@ -115,7 +131,7 @@ export function QuotaBadge({
     return () => {
       cancelled = true;
     };
-  }, [appName, fetchEndpoint, resolvedMonth, userId]);
+  }, [appName, fetcher, fetchEndpoint, resolvedMonth, userId]);
 
   useEffect(() => {
     const isAtLimit = quota.usage >= quota.limit;
