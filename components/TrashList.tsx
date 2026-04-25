@@ -18,6 +18,16 @@ export interface TrashListProps {
   teacherId: string;
   fetchEndpoint?: string;
   restoreEndpoint?: string;
+  /**
+   * 휴지통 목록 fetcher (옵셔널). 호출자가 인증 헤더 등을 포함한 자체 fetch 함수를 주입.
+   * 제공되면 fetchEndpoint 무시하고 fetchItems() 결과를 사용.
+   */
+  fetchItems?: () => Promise<TrashItem[]>;
+  /**
+   * 복구 액션 함수 (옵셔널). 호출자가 인증 포함 자체 호출을 주입.
+   * 제공되면 restoreEndpoint 무시하고 restoreItem(id)를 호출.
+   */
+  restoreItem?: (id: string) => Promise<void>;
   onRestore?: (id: string) => void;
   emptyMessage?: string;
 }
@@ -39,6 +49,8 @@ export function TrashList({
   teacherId,
   fetchEndpoint = '/api/trash',
   restoreEndpoint = '/api/trash/:id/restore',
+  fetchItems,
+  restoreItem,
   onRestore,
   emptyMessage = '휴지통이 비어 있습니다',
 }: TrashListProps) {
@@ -48,41 +60,45 @@ export function TrashList({
 
   useEffect(() => {
     const controller = new AbortController();
+    let cancelled = false;
 
     async function loadItems() {
       try {
         setIsLoading(true);
-        const params = new URLSearchParams({
-          appName,
-          teacherId,
-        });
-        const response = await fetch(`${fetchEndpoint}?${params.toString()}`, {
-          signal: controller.signal,
-        });
-
-        if (!response.ok) {
-          throw new Error('휴지통을 불러오지 못했어요');
+        let payload: TrashItem[];
+        if (fetchItems) {
+          payload = await fetchItems();
+        } else {
+          const params = new URLSearchParams({ appName, teacherId });
+          const response = await fetch(`${fetchEndpoint}?${params.toString()}`, {
+            signal: controller.signal,
+          });
+          if (!response.ok) {
+            throw new Error('휴지통을 불러오지 못했어요');
+          }
+          payload = (await response.json()) as TrashItem[];
         }
-
-        const payload = (await response.json()) as TrashItem[];
+        if (cancelled) return;
         setItems(payload);
       } catch (error) {
-        if (!controller.signal.aborted) {
-          setItems([]);
-          if (error instanceof Error) {
-            console.error(error);
-          }
+        if (cancelled || controller.signal.aborted) return;
+        setItems([]);
+        if (error instanceof Error) {
+          console.error(error);
         }
       } finally {
-        if (!controller.signal.aborted) {
+        if (!cancelled && !controller.signal.aborted) {
           setIsLoading(false);
         }
       }
     }
 
     void loadItems();
-    return () => controller.abort();
-  }, [appName, fetchEndpoint, teacherId]);
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [appName, fetchEndpoint, fetchItems, teacherId]);
 
   const visibleItems = useMemo(() => items.filter((item) => item.daysRemaining >= 0), [items]);
 
@@ -95,20 +111,17 @@ export function TrashList({
     setItems((current) => current.filter((currentItem) => currentItem.id !== item.id));
 
     try {
-      const response = await fetch(buildRestoreUrl(restoreEndpoint, item.id), {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          appName,
-          teacherId,
-          id: item.id,
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error('복구하지 못했어요');
+      if (restoreItem) {
+        await restoreItem(item.id);
+      } else {
+        const response = await fetch(buildRestoreUrl(restoreEndpoint, item.id), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ appName, teacherId, id: item.id }),
+        });
+        if (!response.ok) {
+          throw new Error('복구하지 못했어요');
+        }
       }
 
       onRestore?.(item.id);
