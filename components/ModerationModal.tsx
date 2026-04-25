@@ -130,7 +130,7 @@ export default function ModerationModal({
             <a
               href={selfHarmResource.url}
               target="_blank"
-              rel="noreferrer"
+              rel="noopener noreferrer"
               className="mt-3 inline-flex items-center gap-1 text-sm font-medium text-rose-800 underline underline-offset-4"
             >
               상담 자원 바로가기
