@@ -46,6 +46,39 @@ function normalizeQuota(response: QuotaApiResponse) {
   };
 }
 
+// React StrictMode 이중 마운트 시 동일 파라미터 fetch 중복 방지.
+// 모듈 스코프 in-flight Promise 캐시: 같은 key의 fetch가 진행 중이면 같은 Promise를 공유,
+// 완료 직후 microtask에서 캐시 비움 → 이후 fresh mount는 새 fetch.
+const inFlightFetches = new Map<string, Promise<{ usage: number; limit: number }>>();
+
+async function loadQuotaCached(
+  key: string,
+  appName: string,
+  userId: string,
+  month: string,
+  endpoint: string,
+): Promise<{ usage: number; limit: number }> {
+  const existing = inFlightFetches.get(key);
+  if (existing) return existing;
+
+  const promise = (async () => {
+    try {
+      const params = new URLSearchParams({ appName, userId, month });
+      const response = await fetch(`${endpoint}?${params.toString()}`);
+      if (!response.ok) {
+        throw new Error('쿼터를 불러오지 못했어요');
+      }
+      const payload = (await response.json()) as QuotaApiResponse;
+      return normalizeQuota(payload);
+    } finally {
+      queueMicrotask(() => inFlightFetches.delete(key));
+    }
+  })();
+
+  inFlightFetches.set(key, promise);
+  return promise;
+}
+
 export function QuotaBadge({
   appName,
   userId,
@@ -60,44 +93,28 @@ export function QuotaBadge({
   const hasTriggeredLimitRef = useRef(false);
 
   useEffect(() => {
-    const controller = new AbortController();
+    let cancelled = false;
+    const key = `${appName}|${userId}|${resolvedMonth}|${fetchEndpoint}`;
 
-    async function loadQuota() {
-      try {
-        setIsLoading(true);
-        const params = new URLSearchParams({
-          appName,
-          userId,
-          month: resolvedMonth,
-        });
-        const response = await fetch(`${fetchEndpoint}?${params.toString()}`, {
-          signal: controller.signal,
-        });
-
-        if (!response.ok) {
-          throw new Error('쿼터를 불러오지 못했어요');
-        }
-
-        const payload = (await response.json()) as QuotaApiResponse;
-        setQuota(normalizeQuota(payload));
-      } catch (error) {
-        if (controller.signal.aborted) {
-          return;
-        }
-
+    setIsLoading(true);
+    loadQuotaCached(key, appName, userId, resolvedMonth, fetchEndpoint)
+      .then((result) => {
+        if (cancelled) return;
+        setQuota(result);
+        setIsLoading(false);
+      })
+      .catch((error) => {
+        if (cancelled) return;
         setQuota({ usage: 0, limit: 1000 });
+        setIsLoading(false);
         if (error instanceof Error) {
           console.error(error);
         }
-      } finally {
-        if (!controller.signal.aborted) {
-          setIsLoading(false);
-        }
-      }
-    }
+      });
 
-    void loadQuota();
-    return () => controller.abort();
+    return () => {
+      cancelled = true;
+    };
   }, [appName, fetchEndpoint, resolvedMonth, userId]);
 
   useEffect(() => {
