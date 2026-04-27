@@ -37,7 +37,15 @@
     "vitest": "^3.2.4"
   },
   "files": [
-    "dist/**/*"
+    "dist/**/*",
+    "design-tokens.css"
   ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./design-tokens.css": "./design-tokens.css"
+  },
   "sideEffects": false
 }
