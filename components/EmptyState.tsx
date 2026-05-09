@@ -63,7 +63,7 @@ const EMPTY_STATE_PRESETS: Record<Exclude<EmptyStateContext, 'custom'>, EmptySta
   error: {
     icon: AlertCircle,
     title: '문제가 발생했어요',
-    description: '잠시 후 다시 시도해주세요',
+    description: '잠시 후 다시 시도해보세요',
   },
   offline: {
     icon: WifiOff,
@@ -94,22 +94,82 @@ export function EmptyState({ context, title, description, cta, customIcon }: Emp
 
   const Icon = customIcon && context === 'custom' ? customIcon : preset.icon;
 
+  // 한결 v1 정합 (DESIGN-POLICY §8 빈 상태 4세트):
+  // - 44px 원형 아이콘 컨테이너 (정책 명시 사이즈)
+  // - 한결 토큰 var() 사용, Tailwind primitive class 0건
+  // - hover는 onMouseEnter/Leave (shared 컴포넌트에서 :hover CSS 한계 회피)
+  const isSecondary = cta?.variant === 'secondary';
+  const ctaBaseStyle = isSecondary
+    ? {
+        border: '1px solid var(--color-border, #e7e5e4)',
+        background: 'var(--color-surface, #ffffff)',
+        color: 'var(--color-text-body, #57534e)',
+      }
+    : {
+        border: 'none',
+        background: 'var(--color-btn-primary, #1c1917)',
+        color: 'var(--color-surface, #ffffff)',
+      };
+
   return (
-    <div className="flex flex-col items-center justify-center px-6 py-16 text-center" style={{ wordBreak: 'keep-all' }}>
-      <div className="flex h-20 w-20 items-center justify-center rounded-full bg-stone-100">
-        <Icon className="h-12 w-12 text-stone-400" />
+    <div
+      className="flex flex-col items-center justify-center px-6 py-16 text-center"
+      style={{ wordBreak: 'keep-all' }}
+    >
+      <div
+        className="flex items-center justify-center rounded-full"
+        style={{
+          width: '44px',
+          height: '44px',
+          background: 'var(--color-surface-hover, #f5f5f4)',
+        }}
+      >
+        <Icon
+          style={{
+            width: '20px',
+            height: '20px',
+            color: 'var(--color-text-quaternary, #a8a29e)',
+          }}
+        />
       </div>
-      <h3 className="mt-4 text-lg font-semibold text-stone-900">{title ?? preset.title}</h3>
-      <p className="mt-2 max-w-md text-sm text-stone-500">{description ?? preset.description}</p>
+      <h3
+        className="mt-4 text-lg font-semibold"
+        style={{ color: 'var(--color-text-primary, #1c1917)' }}
+      >
+        {title ?? preset.title}
+      </h3>
+      <p
+        className="mt-2 max-w-md text-sm"
+        style={{ color: 'var(--color-text-muted, #78716c)' }}
+      >
+        {description ?? preset.description}
+      </p>
       {cta ? (
         <button
           type="button"
           onClick={cta.onClick}
-          className={`mt-6 rounded-xl px-4 py-2 text-sm font-medium transition ${
-            cta.variant === 'secondary'
-              ? 'border border-stone-200 bg-white text-stone-700 hover:bg-stone-50'
-              : 'bg-stone-900 text-white hover:bg-stone-800'
-          }`}
+          className="mt-6 rounded-xl px-4 py-2 text-sm font-medium"
+          style={{
+            ...ctaBaseStyle,
+            transition: 'background 150ms cubic-bezier(.2,.8,.2,1), border-color 150ms cubic-bezier(.2,.8,.2,1)',
+            cursor: 'pointer',
+          }}
+          onMouseEnter={(e) => {
+            if (isSecondary) {
+              e.currentTarget.style.background = 'var(--color-surface-alt, #fafaf9)';
+              e.currentTarget.style.borderColor = 'var(--color-border-hover, #d6d3d1)';
+            } else {
+              e.currentTarget.style.background = 'var(--color-btn-primary-hover, #292524)';
+            }
+          }}
+          onMouseLeave={(e) => {
+            if (isSecondary) {
+              e.currentTarget.style.background = 'var(--color-surface, #ffffff)';
+              e.currentTarget.style.borderColor = 'var(--color-border, #e7e5e4)';
+            } else {
+              e.currentTarget.style.background = 'var(--color-btn-primary, #1c1917)';
+            }
+          }}
         >
           {cta.label}
         </button>
