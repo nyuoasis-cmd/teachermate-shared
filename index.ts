@@ -55,5 +55,5 @@ export type {
   UploadDropzoneStatus,
   UploadRejectReason,
 } from './components/UploadDropzone';
-export type { VerdictGroupProps, VerdictValue } from './components/VerdictGroup';
+export type { VerdictGroupProps, VerdictValue, VerdictOption, VerdictTone } from './components/VerdictGroup';
 export type { FocusTrapProps } from './components/FocusTrap';

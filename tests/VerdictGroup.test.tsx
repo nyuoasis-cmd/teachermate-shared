@@ -127,3 +127,89 @@ describe('VerdictGroup', () => {
     expect(screen.getByRole('radiogroup').getAttribute('aria-label')).toBe('기능 작동 확인');
   });
 });
+
+describe('VerdictGroup — generic options (5-3 확장)', () => {
+  type CrossEase = 'easy' | 'difficult' | 'impossible';
+
+  it('renders generic options with custom value types', () => {
+    render(
+      <VerdictGroup<CrossEase>
+        name="cross-ease"
+        value={null}
+        onChange={() => {}}
+        options={[
+          { value: 'easy', label: '쉬워요', tone: 'success' },
+          { value: 'difficult', label: '어려워요', tone: 'warning' },
+          { value: 'impossible', label: '못 했어요', tone: 'danger' },
+        ]}
+      />,
+    );
+    const radios = screen.getAllByRole('radio');
+    expect(radios.length).toBe(3);
+    expect(radios[0].textContent).toBe('쉬워요');
+    expect(radios[1].textContent).toBe('어려워요');
+    expect(radios[2].textContent).toBe('못 했어요');
+    expect(radios[0].getAttribute('data-value')).toBe('easy');
+    expect(radios[0].getAttribute('data-tone')).toBe('success');
+  });
+
+  it('passes generic value through onChange', async () => {
+    const onChange = vi.fn();
+    render(
+      <VerdictGroup<CrossEase>
+        name="cross-ease"
+        value={null}
+        onChange={onChange}
+        options={[
+          { value: 'easy', label: '쉬워요', tone: 'success' },
+          { value: 'difficult', label: '어려워요', tone: 'warning' },
+          { value: 'impossible', label: '못 했어요', tone: 'danger' },
+        ]}
+      />,
+    );
+    await userEvent.click(screen.getByText('어려워요'));
+    expect(onChange).toHaveBeenCalledWith('difficult');
+  });
+
+  it('supports neutral tone (4번째 옵션)', () => {
+    type FourWay = 'a' | 'b' | 'c' | 'd';
+    render(
+      <VerdictGroup<FourWay>
+        name="four"
+        value="d"
+        onChange={() => {}}
+        options={[
+          { value: 'a', label: '좋아요', tone: 'success' },
+          { value: 'b', label: '괜찮아요', tone: 'warning' },
+          { value: 'c', label: '별로예요', tone: 'danger' },
+          { value: 'd', label: '잘 모르겠어요', tone: 'neutral' },
+        ]}
+      />,
+    );
+    const radios = screen.getAllByRole('radio');
+    expect(radios.length).toBe(4);
+    expect(radios[3].getAttribute('data-tone')).toBe('neutral');
+    expect(radios[3].getAttribute('aria-checked')).toBe('true');
+  });
+
+  it('keyboard navigation works with generic options', () => {
+    const onChange = vi.fn();
+    type CrossEase = 'easy' | 'difficult' | 'impossible';
+    render(
+      <VerdictGroup<CrossEase>
+        name="cross-ease"
+        value="easy"
+        onChange={onChange}
+        options={[
+          { value: 'easy', label: '쉬워요', tone: 'success' },
+          { value: 'difficult', label: '어려워요', tone: 'warning' },
+          { value: 'impossible', label: '못 했어요', tone: 'danger' },
+        ]}
+      />,
+    );
+    const radios = screen.getAllByRole('radio');
+    radios[0].focus();
+    fireEvent.keyDown(radios[0], { key: 'ArrowRight' });
+    expect(onChange).toHaveBeenLastCalledWith('difficult');
+  });
+});
