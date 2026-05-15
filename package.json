@@ -1,6 +1,6 @@
 {
   "name": "@teachermate/shared",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "TeacherMate 7개 앱 공용 라이브러리 — 정책·스펙 기반 공유 컴포넌트·유틸·훅",
   "type": "module",
   "main": "./dist/index.js",
@@ -17,9 +17,9 @@
     "url": "git+https://github.com/nyuoasis-cmd/teachermate-shared.git"
   },
   "peerDependencies": {
+    "@supabase/supabase-js": "^2.0.0",
     "react": "^18.0.0 || ^19.0.0",
-    "react-dom": "^18.0.0 || ^19.0.0",
-    "@supabase/supabase-js": "^2.0.0"
+    "react-dom": "^18.0.0 || ^19.0.0"
   },
   "dependencies": {
     "lucide-react": "^0.460.0",
@@ -28,6 +28,9 @@
     "qrcode": "^1.5.0"
   },
   "devDependencies": {
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
     "@types/piexifjs": "^1.0.0",
     "@types/qrcode": "^1.5.0",
     "@types/react": "^19.0.0",
