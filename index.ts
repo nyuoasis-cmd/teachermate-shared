@@ -19,7 +19,14 @@ export { embedPdfMetadata } from './lib/license-inserter/pdf';
 export { useUndoDelete } from './hooks/useUndoDelete';
 export { useGroupInput } from './hooks/useGroupInput';
 export { usePolling } from './hooks/usePolling';
+export { useBeforeUnload } from './hooks/useBeforeUnload';
+export { useCmdEnter } from './hooks/useCmdEnter';
+export { useIosKeyboardScroll } from './hooks/useIosKeyboardScroll';
 export { EmptyState } from './components/EmptyState';
+export { AutosaveIndicator } from './components/AutosaveIndicator';
+export { UploadDropzone } from './components/UploadDropzone';
+export { VerdictGroup } from './components/VerdictGroup';
+export { FocusTrap } from './components/FocusTrap';
 
 export type { FormatRelativeTimeOptions, RelativeTimeMode } from './lib/relative-time';
 export type { ConfirmModalProps } from './components/ConfirmModal';
@@ -39,3 +46,14 @@ export type { LicenseMeta } from './lib/license-inserter/metadata-common';
 export type { UseUndoDeleteOptions, UseUndoDeleteReturn } from './hooks/useUndoDelete';
 export type { UseGroupInputOptions, UseGroupInputReturn } from './hooks/useGroupInput';
 export type { PollingStatus, UsePollingOptions, UsePollingReturn } from './hooks/usePolling';
+export type { UseBeforeUnloadOptions } from './hooks/useBeforeUnload';
+export type { UseCmdEnterOptions } from './hooks/useCmdEnter';
+export type { UseIosKeyboardScrollOptions } from './hooks/useIosKeyboardScroll';
+export type { AutosaveIndicatorProps, AutosaveStatus } from './components/AutosaveIndicator';
+export type {
+  UploadDropzoneProps,
+  UploadDropzoneStatus,
+  UploadRejectReason,
+} from './components/UploadDropzone';
+export type { VerdictGroupProps, VerdictValue } from './components/VerdictGroup';
+export type { FocusTrapProps } from './components/FocusTrap';
