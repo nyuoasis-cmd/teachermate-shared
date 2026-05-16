@@ -27,6 +27,7 @@ export { AutosaveIndicator } from './components/AutosaveIndicator';
 export { UploadDropzone } from './components/UploadDropzone';
 export { VerdictGroup } from './components/VerdictGroup';
 export { FocusTrap } from './components/FocusTrap';
+export { RouteScrollTop } from './components/RouteScrollTop';
 
 export type { FormatRelativeTimeOptions, RelativeTimeMode } from './lib/relative-time';
 export type { ConfirmModalProps } from './components/ConfirmModal';

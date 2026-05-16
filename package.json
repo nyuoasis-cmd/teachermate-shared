@@ -1,6 +1,6 @@
 {
   "name": "@teachermate/shared",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "TeacherMate 7개 앱 공용 라이브러리 — 정책·스펙 기반 공유 컴포넌트·유틸·훅",
   "type": "module",
   "main": "./dist/index.js",
@@ -19,7 +19,13 @@
   "peerDependencies": {
     "@supabase/supabase-js": "^2.0.0",
     "react": "^18.0.0 || ^19.0.0",
-    "react-dom": "^18.0.0 || ^19.0.0"
+    "react-dom": "^18.0.0 || ^19.0.0",
+    "react-router-dom": "^7.0.0"
+  },
+  "peerDependenciesMeta": {
+    "react-router-dom": {
+      "optional": true
+    }
   },
   "dependencies": {
     "lucide-react": "^0.460.0",
@@ -36,6 +42,7 @@
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "jsdom": "^26.1.0",
+    "react-router-dom": "^7.13.2",
     "typescript": "^5.5.0",
     "vitest": "^3.2.4"
   },
