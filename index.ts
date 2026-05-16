@@ -28,6 +28,8 @@ export { UploadDropzone } from './components/UploadDropzone';
 export { VerdictGroup } from './components/VerdictGroup';
 export { FocusTrap } from './components/FocusTrap';
 export { RouteScrollTop } from './components/RouteScrollTop';
+export { DirtyGuardProvider, useDirtyGuardContext } from './components/useDirtyGuard';
+export { BackToSessions } from './components/BackToSessions';
 
 export type { FormatRelativeTimeOptions, RelativeTimeMode } from './lib/relative-time';
 export type { ConfirmModalProps } from './components/ConfirmModal';
@@ -58,3 +60,5 @@ export type {
 } from './components/UploadDropzone';
 export type { VerdictGroupProps, VerdictValue, VerdictOption, VerdictTone } from './components/VerdictGroup';
 export type { FocusTrapProps } from './components/FocusTrap';
+export type { DirtyGuardValue, DirtyGuardProviderProps } from './components/useDirtyGuard';
+export type { BackToSessionsAudience, BackToSessionsProps } from './components/BackToSessions';
