@@ -1,5 +1,17 @@
 import { useEffect, useMemo, useState } from 'react';
 
+/**
+ * ConfirmModal — §9.H-4 single-primary-confirm modal 계약 구현체.
+ *
+ * §9.H-4 / §9.H-8 정렬 (검증 2026-05-16):
+ * - ESC: 닫기 (loading 중 잠금) ✓
+ * - destructive variant: confirm 버튼 autoFocus 없음 → Enter 자동 발화 ❌ (정책 합규) ✓
+ * - backdrop click: 닫기 (loading 중 잠금) ✓
+ * - body scroll lock: open 동안 hidden ✓
+ *
+ * 외부 surface가 §9.H-3·9.H-8 destructive Enter 금지를 만족하려면 ConfirmModal을 사용하라.
+ * 인라인 confirm 모달은 §9.H-4 destructive 계약 미흡 (ESC 누락 빈번).
+ */
 export interface ConfirmModalProps {
   open: boolean;
   onClose: () => void;
