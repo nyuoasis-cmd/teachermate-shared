@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type ReactElement } from 'react';
 import { UndoToast, type UndoToastProps } from './UndoToast';
 
-type BasicToastType = 'success' | 'error';
+type BasicToastType = 'success' | 'error' | 'warning' | 'info';
 
 export interface BasicToastOptions {
   type?: BasicToastType;
@@ -108,6 +108,45 @@ interface BasicToastProps {
   onExpire: () => void;
 }
 
+const TOAST_BG: Record<BasicToastType, string> = {
+  success: 'bg-stone-900',
+  error: 'bg-red-600',
+  warning: 'bg-amber-600',
+  info: 'bg-sky-600',
+};
+
+function ToastIcon({ type }: { type: BasicToastType }): ReactElement {
+  switch (type) {
+    case 'error':
+      return (
+        <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="10" />
+          <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4m0 4h.01" />
+        </svg>
+      );
+    case 'warning':
+      return (
+        <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v4m0 4h.01M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z" />
+        </svg>
+      );
+    case 'info':
+      return (
+        <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="10" />
+          <path strokeLinecap="round" strokeLinejoin="round" d="M12 16v-4m0-4h.01" />
+        </svg>
+      );
+    case 'success':
+    default:
+      return (
+        <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+        </svg>
+      );
+  }
+}
+
 function BasicToast({ message, type, duration, onExpire }: BasicToastProps) {
   useEffect(() => {
     const timer = window.setTimeout(onExpire, duration);
@@ -116,20 +155,11 @@ function BasicToast({ message, type, duration, onExpire }: BasicToastProps) {
 
   return (
     <div
-      className={`flex min-w-[220px] max-w-[calc(100vw-32px)] items-center gap-2 rounded-xl px-4 py-3 text-sm font-medium text-white shadow-lg ${
-        type === 'error' ? 'bg-red-600' : 'bg-stone-900'
-      }`}
+      role={type === 'error' || type === 'warning' ? 'alert' : 'status'}
+      aria-live={type === 'error' || type === 'warning' ? 'assertive' : 'polite'}
+      className={`flex min-w-[220px] max-w-[calc(100vw-32px)] items-center gap-2 rounded-xl px-4 py-3 text-sm font-medium text-white shadow-lg ${TOAST_BG[type]}`}
     >
-      {type === 'error' ? (
-        <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-          <circle cx="12" cy="12" r="10" />
-          <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4m0 4h.01" />
-        </svg>
-      ) : (
-        <svg width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-        </svg>
-      )}
+      <ToastIcon type={type} />
       <span className="truncate">{message}</span>
     </div>
   );
