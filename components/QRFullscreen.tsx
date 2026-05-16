@@ -12,9 +12,10 @@ export interface QRFullscreenProps {
 }
 
 function getQRSize() {
-  const minViewport = Math.min(window.innerWidth, window.innerHeight);
-  const multiplier = window.innerWidth < 768 ? 0.7 : 0.45;
-  return Math.round(minViewport * multiplier);
+  if (typeof window === 'undefined') return 280;
+  const w38vw = window.innerWidth * 0.38;
+  const h32vh = window.innerHeight * 0.32;
+  return Math.round(Math.min(w38vw, h32vh, 280));
 }
 
 export function QRFullscreen({
@@ -102,11 +103,12 @@ export function QRFullscreen({
       </button>
 
       <div
-        className="flex min-h-full flex-col items-center justify-center px-6 py-10 text-center"
+        className="flex min-h-full items-center justify-center px-6 py-10"
         onClick={(event) => event.stopPropagation()}
       >
+        <div className="flex w-full max-w-[580px] flex-col items-center text-center">
         <p className="text-[clamp(18px,2vw,24px)] text-stone-500 [word-break:keep-all]">{sessionTitle}</p>
-        <p className="mt-4 font-mono text-[clamp(72px,15vw,160px)] font-bold tracking-[0.15em] text-stone-900 select-all">
+        <p className="mt-4 font-mono text-[clamp(72px,15vw,112px)] font-bold tracking-[0.15em] text-stone-900 select-all">
           {sessionCode}
         </p>
 
@@ -137,6 +139,7 @@ export function QRFullscreen({
         <p className="mt-6 text-base text-stone-400 [word-break:keep-all] sm:text-xl">
           QR 코드를 스캔하거나 코드를 입력하세요
         </p>
+        </div>
       </div>
     </div>
   );
