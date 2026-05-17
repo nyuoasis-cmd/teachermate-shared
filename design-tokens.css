@@ -82,3 +82,29 @@ h1, h2, h3, h4, h5, h6 {
   line-height: 1.35;
   color: var(--color-text-primary);
 }
+
+/* ===== 시연 모드 sticky (DESIGN-POLICY §9.H-14 / DemoSessionShell 전용) ===== */
+.demo-sticky {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  background: rgb(254 243 199); /* amber-100 */
+  border-bottom: 1px solid rgb(252 211 77); /* amber-300 */
+}
+
+/* ===== Step 사이 carry-over sticky (sprint Step 3·4·5 상단) ===== */
+.carry-sticky {
+  position: sticky;
+  top: 48px; /* demo-sticky 아래 */
+  z-index: 40;
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+}
+
+/* ===== Step 내부 섹션 sticky ===== */
+.section-sticky {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  background: var(--color-surface);
+}

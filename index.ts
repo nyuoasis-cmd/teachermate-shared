@@ -30,6 +30,8 @@ export { FocusTrap } from './components/FocusTrap';
 export { RouteScrollTop } from './components/RouteScrollTop';
 export { DirtyGuardProvider, useDirtyGuardContext } from './components/useDirtyGuard';
 export { BackToSessions } from './components/BackToSessions';
+export { DemoSessionShell, useDemoSession } from './components/DemoSessionShell';
+export { RestoreToast } from './components/RestoreToast';
 
 export type { FormatRelativeTimeOptions, RelativeTimeMode } from './lib/relative-time';
 export type { ConfirmModalProps } from './components/ConfirmModal';
@@ -62,3 +64,5 @@ export type { VerdictGroupProps, VerdictValue, VerdictOption, VerdictTone } from
 export type { FocusTrapProps } from './components/FocusTrap';
 export type { DirtyGuardValue, DirtyGuardProviderProps } from './components/useDirtyGuard';
 export type { BackToSessionsAudience, BackToSessionsProps } from './components/BackToSessions';
+export type { DemoSessionShellProps } from './components/DemoSessionShell';
+export type { RestoreToastProps, RestoreToastSource } from './components/RestoreToast';
