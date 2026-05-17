@@ -5,6 +5,7 @@ export type AutosaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 export interface AutosaveIndicatorProps {
   status: AutosaveStatus;
   position?: 'fixed' | 'inline';
+  placement?: 'top-right' | 'bottom-right';
   errorMessage?: string;
   savedDuration?: number;
   onAutoHide?: () => void;
@@ -13,6 +14,7 @@ export interface AutosaveIndicatorProps {
 export function AutosaveIndicator({
   status,
   position = 'fixed',
+  placement = 'bottom-right',
   errorMessage = '저장 실패',
   savedDuration = 1500,
   onAutoHide,
@@ -55,7 +57,9 @@ export function AutosaveIndicator({
       ? {
           ...baseStyle,
           position: 'fixed',
-          bottom: 'max(24px, env(safe-area-inset-bottom))',
+          ...(placement === 'top-right'
+            ? { top: 'max(24px, env(safe-area-inset-top))' }
+            : { bottom: 'max(24px, env(safe-area-inset-bottom))' }),
           right: '24px',
           zIndex: 50,
         }

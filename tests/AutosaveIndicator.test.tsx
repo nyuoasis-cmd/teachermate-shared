@@ -65,4 +65,20 @@ describe('AutosaveIndicator', () => {
     const node = screen.getByRole('status');
     expect(node.style.position).toBe('fixed');
   });
+
+  it('places at bottom-right by default', () => {
+    render(<AutosaveIndicator status="saving" />);
+    const node = screen.getByRole('status');
+    expect(node.style.bottom).not.toBe('');
+    expect(node.style.top).toBe('');
+    expect(node.style.right).toBe('24px');
+  });
+
+  it('places at top-right when placement="top-right"', () => {
+    render(<AutosaveIndicator status="saving" placement="top-right" />);
+    const node = screen.getByRole('status');
+    expect(node.style.top).not.toBe('');
+    expect(node.style.bottom).toBe('');
+    expect(node.style.right).toBe('24px');
+  });
 });
