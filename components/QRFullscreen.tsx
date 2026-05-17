@@ -92,10 +92,17 @@ export function QRFullscreen({
   }
 
   return (
-    <div className="fixed inset-0 z-[100] bg-white" onClick={onClose}>
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="qr-fullscreen-title"
+      aria-describedby="qr-fullscreen-hint"
+      className="fixed inset-0 z-[100] bg-white"
+      onClick={onClose}
+    >
       <button
         type="button"
-        aria-label="닫기"
+        aria-label="QR 코드 닫기"
         onClick={onClose}
         className="absolute right-4 top-4 inline-flex h-11 w-11 items-center justify-center rounded-full text-stone-500 transition hover:bg-stone-100 hover:text-stone-900"
       >
@@ -107,7 +114,7 @@ export function QRFullscreen({
         onClick={(event) => event.stopPropagation()}
       >
         <div className="flex w-full max-w-[580px] flex-col items-center text-center">
-        <p className="text-[clamp(18px,2vw,24px)] text-stone-500 [word-break:keep-all]">{sessionTitle}</p>
+        <p id="qr-fullscreen-title" className="text-[clamp(18px,2vw,24px)] text-stone-500 [word-break:keep-all]">{sessionTitle}</p>
         <p className="mt-4 font-mono text-[clamp(72px,15vw,112px)] font-bold tracking-[0.15em] text-stone-900 select-all">
           {sessionCode}
         </p>
@@ -136,7 +143,7 @@ export function QRFullscreen({
           </div>
         ) : null}
 
-        <p className="mt-6 text-base text-stone-400 [word-break:keep-all] sm:text-xl">
+        <p id="qr-fullscreen-hint" className="mt-6 text-base text-stone-400 [word-break:keep-all] sm:text-xl">
           QR 코드를 스캔하거나 코드를 입력하세요
         </p>
         </div>
