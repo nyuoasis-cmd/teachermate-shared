@@ -47,7 +47,12 @@ export function UndoToast({
   };
 
   return (
-    <div className="flex min-w-[280px] max-w-[calc(100vw-32px)] items-center gap-3 rounded-xl bg-stone-900 px-4 py-3 text-white shadow-lg">
+    <div
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
+      className="flex min-w-[280px] max-w-[calc(100vw-32px)] items-center gap-3 rounded-xl bg-stone-900 px-4 py-3 text-white shadow-lg"
+    >
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-medium">{message}</p>
         {hasUndoError ? <p className="mt-1 text-xs text-red-200">실행 취소에 실패했어요. 다시 시도해주세요.</p> : null}
