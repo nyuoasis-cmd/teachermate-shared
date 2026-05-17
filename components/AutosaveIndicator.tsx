@@ -40,13 +40,8 @@ export function AutosaveIndicator({
       : 'var(--color-text-muted, #78716c)';
 
   const baseStyle: CSSProperties = {
-    padding: '8px 14px',
-    borderRadius: '8px',
-    fontSize: '13px',
+    fontSize: '12px',
     color,
-    background: 'var(--color-surface, #ffffff)',
-    border: `1px solid ${status === 'error' ? 'var(--color-danger-border, #fecaca)' : 'var(--color-border, #e7e5e4)'}`,
-    boxShadow: '0 4px 12px rgba(0,0,0,0.06)',
     pointerEvents: 'none',
     wordBreak: 'keep-all',
     transition: 'opacity 150ms cubic-bezier(.2,.8,.2,1)',
