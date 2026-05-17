@@ -1,6 +1,6 @@
 {
   "name": "@teachermate/shared",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "TeacherMate 7개 앱 공용 라이브러리 — 정책·스펙 기반 공유 컴포넌트·유틸·훅",
   "type": "module",
   "main": "./dist/index.js",
