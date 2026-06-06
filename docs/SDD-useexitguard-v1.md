@@ -35,6 +35,7 @@
 - **SC-7** `grep -c "releasedRef" hooks/useExitGuard.ts` ≥ 1 (동기 disarm ref — codex R7/R9).
 - **SC-8** `grep -c "releaseAndNavigate" hooks/useExitGuard.ts` ≥ 1.
 - **SC-9** 라우트당1개 DEV 경고(codex R12)는 **빌드 호환 DEV 감지**로 구현(codex SDD R3 [high]). 이 패키지는 순수 `tsc` 빌드 + tsconfig `types:["react","react-dom"]`(vite/client 없음)이라 리터럴 `import.meta.env.DEV`는 `ImportMeta.env` 미정의로 typecheck 실패. **권장 형태**(ambient vite 타입 불요, tsc 통과): `const isDev = (import.meta as ImportMeta & { env?: { DEV?: boolean } }).env?.DEV === true`. **검증 = grep 리터럴 강제 폐기 →** SC-19(`npm run typecheck` EXIT=0)와 **동시 통과** + 동작은 **SC-T13 테스트**(dev/test 모드에서 중복 활성 가드 시 `console.error` 호출)로 실증.
+- **SC-9b (회귀 금지 grep-negative, codex SDD R4)** `grep -c "import\.meta\.env\.DEV" hooks/useExitGuard.ts components/ExitGuardModal.tsx` = **0** (빌드 깨는 리터럴 형태 금지 — typed 캐스트만 허용). Plan도 동일 typed 형태로 정정(Plan↔SDD 일치).
 - **SC-10** `grep -c "history.back" hooks/useExitGuard.ts` 의 호출 분기는 serializedRelease 경로에만(일반 disarm/언마운트 cleanup에는 없음). 코드 리뷰 + 테스트로 검증(grep만으론 분기 위치 판정 불가 → 테스트 SC-T6/T7가 실증).
 - **SC-11** beforeunload는 **자체 핸들러 + 동기 ref 게이팅**(Plan R9 — `useBeforeUnload(when && !released)` state 의존 경로 **금지**). 검증: `grep -c "addEventListener('beforeunload'" hooks/useExitGuard.ts` ≥ 1 **그리고** 핸들러 본문이 이벤트 시점 `releasedRef.current`(+`when`)를 읽음(코드 리뷰) + serializedRelease가 cb 전 removeEventListener/disposer 호출. `grep -c "useBeforeUnload" hooks/useExitGuard.ts` = **0**(새 훅은 기존 useBeforeUnload에 의존하지 않음). 동기 disarm 실증 = 테스트 SC-T8.
 
