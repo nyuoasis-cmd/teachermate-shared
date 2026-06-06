@@ -64,7 +64,7 @@
    - **navigate 콜백은 정확히 1회 실행(idempotent latch)** — 이미 실행됐으면 재실행 금지.
    - **fallback(누락/중복 popstate 방지, codex R5 [medium])** — (a) 경로에서 `history.back()` 후 popstate가 일정 시간(예: setTimeout ~50ms microtask/macrotask) 내 안 오거나, back 가용성이 의심되면(`history.length`/state 마커 검사), **fallback이 one-shot 핸들러를 떼고 navigate를 1회 실행**. 중복 popstate가 와도 latch로 navigate는 1회. → "listener는 대기 중인데 콜백이 영영 안 와서 사용자가 가드 페이지에 갇히는" dead-exit 원천 차단.
    - **공용 프리미티브 `serializedRelease(cb)`** — 위 (a)/(b) + latch + fallback 로직을 단일 내부 함수로 추출하고, **confirmExit과 releaseAndNavigate가 모두 이걸 호출**(confirmExit은 cb=onConfirmExit, releaseAndNavigate는 cb=navigate). 두 경로가 같은 직렬화 코드를 공유해 race/exactly-once 동작이 일치(codex R6 [high]).
-   - **terminal disarm 먼저, cb는 나중(재진입 차단, codex R7 [high])** — `serializedRelease`는 **명시적 상태 전이**다: ① `released` 플래그를 atomically set ② **메인 popstate 핸들러 제거/바이패스**(이후 popstate는 prompt 미표시·재push 안 함) ③ promptOpen=false clear ④ 소유 sentinel 소비 ⑤ **그 다음에야** cb를 1회 실행. 즉 cb(=onConfirmExit/navigate)가 실행될 때 가드는 이미 **완전히 disarm**된 상태. → history.back()이 가드 URL에 착지해 훅이 아직 `when===true`로 마운트돼 있어도, cb가 즉시 언마운트 안 되는 네비(예: 지연 router action, `location.assign`)를 해도 **메인 가드가 재arm/재push/prompt 재오픈하지 않음**. `released`면 useEffect의 재arm 로직도 no-op(언마운트 전까지 1회성).
+   - **terminal disarm 먼저, cb는 나중(재진입 차단, codex R7 [high])** — `serializedRelease`는 **명시적 상태 전이**다: ① `released` 플래그를 atomically set ② **메인 popstate 핸들러 제거/바이패스**(이후 popstate는 prompt 미표시·재push 안 함) ③ **beforeunload disarm** — `useBeforeUnload`는 `when && !released`로 배선되어 released 시 native unload confirm 비활성(codex R8 [high]) ④ promptOpen=false clear ⑤ 소유 sentinel 소비 ⑥ **그 다음에야** cb를 1회 실행. **모든 가드 표면(popstate·rearm·beforeunload)을 cb 실행 전에 끈다.** 즉 cb(=onConfirmExit/navigate)가 실행될 때 가드는 이미 **완전히 disarm**된 상태. → history.back()이 가드 URL에 착지해 훅이 아직 `when===true`로 마운트돼 있어도, cb가 즉시 언마운트 안 되는 네비(예: 지연 router action, `location.assign`)를 해도 **메인 가드가 재arm/재push/prompt 재오픈하지 않음**. `released`면 useEffect의 재arm 로직도 no-op(언마운트 전까지 1회성).
 8. **누수 한정(정직한 계약)** — "잔여 sentinel 0"은 다음에서만 보장: cancel/confirm·소유 entry 유지한 clean 언마운트·**releaseAndNavigate 경유** 내부 이탈. releaseAndNavigate를 **안 거치고** 생 navigate한 미조정 경로는 stale sentinel 1개가 스택 중간에 남을 수 있음(History API는 중간 entry 삭제 불가). 단 **bounded**: ① idempotent 재arm으로 마운트당 sentinel 최대 1개(무한 중복 금지) ② 목적지에서 브라우저 Back으로 stale entry(=가드 화면 URL) 착지 시 가드 화면 remount + 재arm(새 listener)되어 phantom listener-less 상태 없음. → 그래서 **슬라이스 1 AC**: 가드 화면의 모든 내부 이탈 경로는 releaseAndNavigate 경유.
 9. **호출자 책임 명확화** — `onConfirmExit`/`releaseAndNavigate`의 navigate 콜백이 "실제 이탈 동작"(navigate/leave)을 담당. 훅은 history/모달 상태·직렬화만 관리.
 
@@ -80,6 +80,7 @@
 | confirmExit 후 목적지서 브라우저 Back | 잔여 sentinel 없음(클린) |
 | **재진입: onConfirmExit이 history.back()/location.assign/지연 router nav 하고 컴포넌트가 ≥1 tick 마운트 유지** | prompt 재오픈 0·sentinel 재push 0(가드 terminal disarm 후 cb 실행) |
 | **release 후 popstate 추가 발생** | released 플래그로 메인 핸들러 no-op(재arm/재push 0) |
+| **release 후 beforeunload(컴포넌트 ≥1tick 마운트·when 여전히 true)** | beforeunload **미차단**(useBeforeUnload(when && !released)) → 네이티브 unload confirm 중복 0 |
 | double-back(뒤로가기 2연타) | 첫 back에서 차단, 두 번째도 차단(나가지지 않음) |
 | `when` true→false 전환 | listener 제거, 잔여 sentinel 0 |
 | 가드 활성 상태로 언마운트 | history 누수 0, listener 제거 |
@@ -113,7 +114,7 @@
   }
   function useExitGuard(opts: UseExitGuardOptions): UseExitGuardReturn;
   ```
-  추가로 `useBeforeUnload(when)`을 내부 호출해 탭 닫기(보조)도 함께 커버.
+  추가로 `useBeforeUnload(when && !released)`를 내부 호출해 탭 닫기(보조)도 커버하되, **terminal release 후에는 beforeunload도 함께 disarm**(아래 disarm 계약 — codex R8 [high]). 즉 confirmed-exit 콜백이 location.assign/지연 nav를 해도 네이티브 beforeunload가 중복으로 뜨지 않음.
 - **Alternatives** — 훅이 모달까지 렌더(JSX 반환) → 거부(훅은 JSX 반환 안 함, React 규약). 대신 옵션 컴포넌트 `<ExitGuardModal {...guard} />` 제공.
 - **Consequences** — ar-storybook의 `{blocker.state}` 패턴과 유사한 사용성. 앱은 `const guard = useExitGuard({when, onConfirmExit}); ... <ExitGuardModal {...guard} />`.
 
