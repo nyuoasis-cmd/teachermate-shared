@@ -54,7 +54,8 @@
 
 ### ADR-1 부속: sentinel 생명주기 계약 (슬라이스 0에서 확정 — 모든 앱 슬라이스가 import하는 contract)
 > **소유권 원칙(codex R2 [high] 반영)**: sentinel push 시 `history.state`에 **유니크 마커**를 심되 **기존 router 소유 state를 보존(merge)하고 URL을 유지**한다(codex R9 [high]): `history.pushState({ ...history.state, __tmExitGuard: <uid> }, '', window.location.href)`. uid는 훅 인스턴스별 ref(마운트마다 유니크 — StrictMode 이중호출에도 구분되게 생성). ⚠️ `{__tmExitGuard:uid}`만 넘기면 BrowserRouter/Data Router의 location key·navigation index가 날아가 router pop이 오동작하므로 **반드시 spread merge**. **어떤 history.back() 보정도, 호출 직전 `history.state?.__tmExitGuard === <자기 uid>`(=현재 entry가 내가 소유한 sentinel)일 때만 실행한다.** 소유 entry가 아니면 back()을 **호출하지 않고** listener/ref만 정리.
-> **충돌 경계 + 단일 소유자 중재(중첩 가드·StrictMode·타 버전 — codex R10 [medium]·R11 [high])**: 각 인스턴스는 `ownsSentinelRef`(소유 여부)를 둔다. arm 직전 현재 entry에 **다른** 활성 uid의 `__tmExitGuard`가 있으면 — **내 sentinel을 push하지 않고**(덮어쓰기 금지) `ownsSentinelRef=false`로 **passive(비활성)** 상태가 된다. **passive 인스턴스는 popstate에서 prompt 열기·재push·release·back 보정을 일절 하지 않는다(완전 no-op).** 내가 직접 sentinel을 push해 소유했을 때만 `ownsSentinelRef=true`. **모든 popstate 처리(prompt/repush)·serializedRelease back 보정은 `ownsSentinelRef.current===true`로 게이팅** → owner 1명만 차단/재push/release. 비-owner가 owner의 popstate에 반응해 uid를 뒤집는 일 없음. (중첩 시 먼저 arm한 인스턴스가 owner, 나머지는 passive로 화면을 중복 가드하지 않음.)
+> **충돌 경계 + 단일 소유자 중재(중첩 가드·StrictMode·타 버전 — codex R10 [medium]·R11 [high])**: 각 인스턴스는 `ownsSentinelRef`(소유 여부)를 둔다. arm 직전 현재 entry에 **다른** 활성 uid의 `__tmExitGuard`가 있으면 — **내 sentinel을 push하지 않고**(덮어쓰기 금지) `ownsSentinelRef=false`로 **passive(비활성)** 상태가 된다. **passive 인스턴스는 popstate에서 prompt 열기·재push·release·back 보정을 일절 하지 않는다(완전 no-op).** 내가 직접 sentinel을 push해 소유했을 때만 `ownsSentinelRef=true`. **모든 popstate 처리(prompt/repush)·serializedRelease back 보정은 `ownsSentinelRef.current===true`로 게이팅** → owner 1명만 차단/재push/release. 비-owner가 owner의 popstate에 반응해 uid를 뒤집는 일 없음.
+> **계약: 라우트당 useExitGuard 1개(codex R11·R12 [high])**. passive 폴백은 owner 소유권 뒤집힘을 막는 **런타임 안전망**일 뿐, **중첩된 dirty 가드(같은 화면에 자기 `when`/`onConfirmExit`를 가진 2개 이상)는 지원 패턴이 아니다.** 그런 구성은 자식 가드가 조용히 무력화돼 데이터 유실로 이어질 수 있으므로: **DEV(`import.meta.env.DEV`)에서 같은 entry에 다른 활성 uid 마커가 있는데 내 `when===true`이면 `console.error`로 "useExitGuard: 라우트당 1개만 — 두 번째 가드의 보호가 비활성화됨" 경고**(조용한 무력화 금지, codex "passive must not be silent"). 슬라이스 1 AC가 각 세션 라우트에 정확히 1개만 마운트되도록 보장. (StrictMode 이중 마운트는 같은 컴포넌트라 cleanup→remount 순서로 1개만 활성 — uid 재생성 + 마운트당 idempotent로 흡수.)
 1. **단 하나의 sentinel만 유지(idempotent)** — `when`이 false→true로 바뀌는 시점에만 sentinel을 1회 push. 리렌더·동일 `when` 값 반복에서는 추가 push 금지(push 여부 + uid를 ref로 기억).
 2. **차단 시 재push (owner만)** — popstate로 뒤로가기가 감지되고 `when===true` **그리고 `ownsSentinelRef.current===true`(소유자)**일 때만, 확인 모달을 열고 sentinel을 **정확히 1개** 재push(같은 uid)해 사용자를 페이지에 잔류시킴(중복 push 금지). passive(비소유) 인스턴스의 popstate 핸들러는 no-op(codex R11 [high]).
 3. **confirmExit** — **releaseAndNavigate와 동일한 직렬화 release 프리미티브 경유**(codex R6 [high] 반영). 즉 confirmExit = `serializedRelease(onConfirmExit)`: releasing 플래그 set → 소유 entry이면 history.back() → one-shot popstate 또는 timeout fallback 완료 후 `onConfirmExit()` **정확히 1회** 호출(소유 entry 아니면 back 생략·즉시 1회). `history.back()`이 비동기이므로 onConfirmExit을 back 완료 전 동기 호출하지 않는다. 이중 back/잔여 entry 0 보장.
@@ -89,6 +90,7 @@
 | **로컬 UI 언마운트(이탈 아님)** | history.back() **미호출**, URL 불변, listener/타이머 정리 |
 | **중첩 가드/StrictMode: 현재 entry에 다른 활성 uid 마커 존재** | 내 sentinel 미push(덮어쓰기 0), ownsSentinelRef=false(passive), 외부 가드 소유 유지 |
 | **passive(비소유) 인스턴스에 popstate 도달** | prompt 안 열림·재push 0·release 0(완전 no-op), owner만 반응 |
+| **중첩 dirty 가드(같은 화면 2개·when=true) DEV** | console.error로 "라우트당 1개" 경고(조용한 무력화 금지), passive는 런타임 안전망 |
 | double-back(뒤로가기 2연타) | 첫 back에서 차단, 두 번째도 차단(나가지지 않음) |
 | `when` true→false 전환 | history.back() **미호출**, listener/beforeunload 게이트 해제, URL 불변, bounded stale sentinel ≤1 허용(잔여 0 강제 안 함) |
 | 가드 활성 상태로 언마운트 | listener/타이머 제거, back() 미호출(bounded stale 1개 허용), 재진입/리스너 누수 0 |
@@ -156,6 +158,7 @@
 - **앱 내부 SPA 네비게이션(Link/navigate/redirect) 차단** — 본 공유 훅의 범위 아님(위 "범위 경계"). 필요한 앱은 슬라이스 1에서 자체 처리.
 - **Data Router용 router 어댑터 실구현** — ADR-4의 전방호환 자리만 남기고 미구현(YAGNI).
 - **각 앱 내부 이탈경로 인벤토리/커버** — 슬라이스 1 각 앱 PR의 AC(슬라이스 0은 contract만 제공).
+- **중첩 dirty 가드(한 화면에 useExitGuard 2개+) 지원** — 미지원. 계약 = 라우트당 1개(DEV 경고로 강제). 다중 가드 합성용 arbiter/registry는 슬라이스 0 범위 밖(현재 필요한 앱 0 = YAGNI).
 - 4개 비소비 앱(data-class·kospi·vibe·sangkwon)에 `@teachermate/shared` dep 추가 — 슬라이스 1에서 앱별 수행.
 - `useBeforeUnload`/`BackToSessions`/`DirtyGuardProvider` 기존 동작 변경 — 재사용만, 시그니처 불변.
 - verify-route-policy 스킬에 §9.H-18/19 검사 추가 — 별도 부수 작업(에픽 후반).
