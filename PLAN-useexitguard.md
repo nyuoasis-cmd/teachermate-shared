@@ -59,8 +59,10 @@
 3. **confirmExit** — listener 제거 후, **소유권 체크 통과 시에만** 잔류 sentinel을 history.back()으로 소비하고 `onConfirmExit()` 호출. 소유 entry가 아니면 back() 생략하고 바로 `onConfirmExit()`. 이중 back/잔여 entry 0 보장.
 4. **cancelExit** — 모달만 닫음. 2번에서 이미 sentinel이 재push되어 있으므로 추가 history 조작 없음(중복 방지).
 5. **`when`이 true→false** — **소유권 체크 통과 시에만** sentinel 소비(history 보정), 통과 못하면 보정 생략. popstate listener 제거. 잔여 entry 0.
-6. **언마운트** — cleanup에서 listener/ref 제거 + **소유권 체크 통과 시에만** 미소비 sentinel 보정. 내부 navigate/redirect로 인한 언마운트(=새 라우트가 이미 push됨)면 소유 entry가 아니므로 back() 미실행 → **새 라우트 전환을 건드리지 않음**. 가드가 활성인 채 언마운트돼도 history 누수 0.
-7. **호출자 책임 명확화** — `onConfirmExit`은 "실제 이탈 동작"(navigate/leave)만 담당. 훅은 history/모달 상태만 관리.
+6. **언마운트** — cleanup에서 listener/ref 제거 + **소유권 체크 통과 시에만** 미소비 sentinel 보정. 내부 navigate/redirect로 인한 언마운트(=새 라우트가 이미 push됨)면 소유 entry가 아니므로 back() 미실행 → **새 라우트 전환을 건드리지 않음**.
+7. **releaseGuard()(코디네이트된 내부 이탈, codex R3 [high] 반영)** — 앱이 가드 화면에서 내부 navigate/redirect로 나갈 때 **route push 직전 호출**. 소유 sentinel이 아직 현재 entry이므로 그 자리에서 소비(보정) → 새 라우트가 깨끗한 스택 위에 push됨. 이것이 내부 이탈에서 잔여 0을 보장하는 **유일한 정식 경로**.
+8. **누수 한정(정직한 계약)** — "잔여 sentinel 0"은 다음에서만 보장: cancel/confirm·소유 entry 유지한 clean 언마운트·releaseGuard 선호출 내부 이탈. **releaseGuard 없이** 내부 navigate한 미조정 경로는 stale sentinel 1개가 스택 중간에 남을 수 있음(History API는 중간 entry 삭제 불가). 단 **bounded**: ① idempotent 재arm으로 마운트당 sentinel 최대 1개(무한 중복 금지) ② 목적지에서 브라우저 Back으로 stale entry(=가드 화면 URL) 착지 시 가드 화면이 remount되며 **재arm**(새 listener 부착)되어 phantom listener-less 상태 없음. → 그래서 **슬라이스 1 AC**: 가드 화면의 모든 내부 이탈 경로는 releaseGuard()를 route push 전 호출(아래 Out of Scope/범위경계).
+9. **호출자 책임 명확화** — `onConfirmExit`은 "실제 이탈 동작"(navigate/leave)만 담당. 훅은 history/모달 상태만 관리.
 
 ### 테스트 매트릭스 (슬라이스 0 AC — jsdom popstate dispatch, codex R1 [high] 반영)
 | 시나리오 | 기대 |
@@ -75,6 +77,8 @@
 | **내부 navigate/Link로 새 라우트 push 후 언마운트** | cleanup이 history.back() **미실행**(소유 entry 아님), 새 라우트 그대로 유지(루프 없음) |
 | **프로그램적 redirect 후 언마운트** | 동일 — 소유권 체크로 back() 생략, redirect 목적지 유지 |
 | **소유권 체크**: 내부 push 후 history.state.__tmExitGuard ≠ 자기 uid | 모든 back() 보정 분기에서 skip 검증 |
+| **releaseGuard() 호출 후 내부 navigate** | sentinel 그 자리서 소비 → 새 라우트가 클린 스택 위 push, 잔여 sentinel 0 |
+| **미조정 내부 navigate→목적지서 브라우저 Back** | stale entry(가드 URL) 착지 시 가드 화면 remount + 재arm(listener 부착), sentinel 마운트당 ≤1(무한 중복 0), phantom listener-less 상태 없음 |
 
 ### ADR-2: 기존 DirtyGuard/ConfirmModal 재사용, 신규 상태머신 금지
 - **Context** — isDirty 추적·확인 모달·나가기 카피가 이미 공유 패키지에 존재.
@@ -86,7 +90,12 @@
 - **Decision** —
   ```ts
   interface UseExitGuardOptions { when: boolean; onConfirmExit: () => void; message?: string; }
-  interface UseExitGuardReturn { promptOpen: boolean; confirmExit: () => void; cancelExit: () => void; }
+  interface UseExitGuardReturn {
+    promptOpen: boolean;
+    confirmExit: () => void;
+    cancelExit: () => void;
+    releaseGuard: () => void;  // 내부 navigate/redirect 직전 호출 → sentinel을 현재 상태에서 소비(스택 클린). codex R3 [high] 반영
+  }
   function useExitGuard(opts: UseExitGuardOptions): UseExitGuardReturn;
   ```
   추가로 `useBeforeUnload(when)`을 내부 호출해 탭 닫기(보조)도 함께 커버.
@@ -107,7 +116,7 @@
 ## 범위 경계 — useExitGuard가 막는 것 / 안 막는 것 (codex R1 [medium] 반영)
 - ✅ **막음**: 브라우저 뒤로가기 버튼, 모바일 하드웨어 뒤로가기, (보조) 탭 닫기/새로고침(useBeforeUnload).
 - ❌ **안 막음**: 앱 **내부** SPA 네비게이션 — `<Link>`, `navigate()`, 헤더/네비 링크, 프로그램적 redirect, 앱별 커스텀 이동 컨트롤. 이는 popstate를 발생시키지 않으므로 본 훅 범위 밖.
-- → **BackToSessions는 "공유 나가기 버튼" 1개 경로만 confirm**을 담당하며, 임의의 Link/navigate를 포괄하지 않는다(codex 지적 수용). 따라서 **슬라이스 1 각 앱 적용 시, 그 앱의 모든 내부 이탈 경로(Link/navigate/header/redirect)를 인벤토리**하고 데이터 유실 위험이 있는 곳은 BackToSessions-동급 confirm 또는 (Data Router면) useBlocker로 별도 커버하는 것을 **슬라이스 1 AC에 포함**한다. 이 인벤토리·커버는 슬라이스 0 범위 밖(아래).
+- → **BackToSessions는 "공유 나가기 버튼" 1개 경로만 confirm**을 담당하며, 임의의 Link/navigate를 포괄하지 않는다(codex 지적 수용). 따라서 **슬라이스 1 각 앱 적용 시, 그 앱의 모든 내부 이탈 경로(Link/navigate/header/redirect)를 인벤토리**하고 (a) 데이터 유실 위험이 있는 곳은 BackToSessions-동급 confirm 또는 (Data Router면) useBlocker로 별도 커버 + (b) **가드 화면을 떠나는 내부 이탈은 route push 직전 `releaseGuard()` 호출**(stale sentinel 방지, ADR-1 부속 7·8)을 **슬라이스 1 AC에 포함**한다. 이 인벤토리·커버는 슬라이스 0 범위 밖(아래).
 
 ## Out of Scope (이번에 안 하는 것)
 - 앱 코드 수정 일체 (슬라이스 1: 가드 전무 7앱 적용 / 슬라이스 2: 교사 네비 / 슬라이스 3: 복귀 링크) — **전부 후속 슬라이스**.
