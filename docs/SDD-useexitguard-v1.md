@@ -110,7 +110,7 @@ export function useExitGuard(opts: UseExitGuardOptions): UseExitGuardReturn;
 - [ ] **SC-T19 (예외)** Given releaseAndNavigate 중 뒤로가기 신호가 안 오거나(누락) 2번(중복) 와도, Then navigate는 정확히 1번 실행된다(대비책·latch).
 - [ ] **SC-T20 (경계)** Given 가드 화면에서 내부 navigate/Link로 새 라우트가 push된 뒤 언마운트되면(소유권 마커≠내 uid), Then cleanup이 history.back을 부르지 않아 새 라우트가 유지된다(루프 없음).
 - [ ] **SC-T21 (경계)** Given 프로그램적 redirect로 새 라우트 push 후 언마운트, Then 동일하게 history.back 미실행·redirect 목적지 유지.
-- [ ] **SC-T22 (경계, bounded)** Given releaseAndNavigate를 안 거치고 생 navigate로 떠난 뒤 목적지에서 브라우저 뒤로가기로 stale entry(가드 URL)에 착지하면, Then 그 화면이 remount되고(when=true면) 재arm되며 sentinel은 마운트당 ≤1(무한 중복 0)·listener-less phantom 없음.
+- [ ] **SC-T22 (경계, bounded — 통제된 remount 한정, codex SDD R6 [high])** Given **통제된 테스트 하니스에서 가드 화면이 실제로 remount되는 경우에 한해**, releaseAndNavigate를 안 거치고 생 navigate로 떠난 뒤 stale entry(가드 URL)에 재마운트되면, Then 재arm은 idempotent(sentinel 마운트당 ≤1·무한 중복 0)이고 listener-less phantom이 없다. ⚠️ **이 단정은 "guard 화면이 remount된다"는 조건부 bounded 속성만 검증**한다. **redirect/auth-gated/route-loader로 guard 화면이 remount되지 않는 raw-navigate 경로는 Slice 0가 보장하지 못함**(라우터 무관 훅 + 앱 라우트 무변경) — 그런 경로는 **Slice 1 blocking 인벤토리**에서 releaseAndNavigate 또는 명시적 confirm/useBlocker로 커버(아래 한계 명시 + Plan ADR-5).
 
 - [ ] **SC-T23 (예외, 재진입 — Plan ADR-1부속7/매트릭스 "재진입" 행, codex SDD R2 [high])** Given confirmExit로 이탈 확정 후 onConfirmExit이 ⓐ`history.back()` ⓑ`location.assign(...)` ⓒ지연 router navigate 중 하나를 하고 컴포넌트가 **≥1 tick 마운트 유지**되면, Then **prompt 재오픈 count=0 AND sentinel 재push count=0**(terminal disarm이 메인 popstate/rearm을 이미 껐기 때문). 3개 변형 각각 검증.
 - [ ] **SC-T24 (예외, 소유권-skip 전 분기 — Plan 소유권 원칙, codex SDD R2 [medium])** Given `history.state.__tmExitGuard`가 **다른 uid**로 바뀐 상태에서, When `confirmExit`과 `releaseAndNavigate`를 각각 호출하면, Then **history.back은 호출되지 않고**(비소유라 skip) 콜백(onConfirmExit/navigate)은 **정확히 1번** 실행된다. (back 보정은 모든 serializedRelease 진입점에서 `ownsSentinelRef`·마커 일치 시에만.)
@@ -119,6 +119,10 @@ export function useExitGuard(opts: UseExitGuardOptions): UseExitGuardReturn;
 
 ## §7 구현 노트 의무
 본 PR은 IMPLEMENTATION-NOTES-POLICY 적용 대상. Generator는 `docs/implementation-notes/PR-pending-useexitguard.md`에 Decisions/Changes/Tradeoffs/Notes 4섹션을 STEP마다 누적 갱신.
+
+## Slice 0가 보장하지 못하는 것 (한계 — codex SDD R6, Plan ADR-5)
+- **redirect/auth-gated/route-loader로 guard 화면이 remount되지 않는 raw-navigate 이탈** — router 무관 훅 + 앱 라우트 무변경이라 Slice 0가 stale-sentinel 안전을 강제 못 함. → **Slice 1 blocking 인벤토리 의무**: 그런 경로는 releaseAndNavigate 또는 명시적 confirm/useBlocker로 커버해야 그 앱이 "가드 적용됨"으로 인정.
+- bounded stale sentinel(미조정 이탈)은 수용된 한계(Plan ADR-5).
 
 ## Out of Scope (SDD 재확인)
 앱 코드 변경 / 4개 비소비 앱 dep 추가 / 앱 내부 이탈경로 인벤토리 / Data Router 어댑터 실구현 / 중첩 dirty 가드 arbiter / 기존 useBeforeUnload·BackToSessions·DirtyGuard 동작 변경 — 전부 범위 밖(Plan Out of Scope).
