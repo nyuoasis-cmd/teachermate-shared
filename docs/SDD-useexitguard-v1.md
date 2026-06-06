@@ -19,7 +19,7 @@
 
 ## §2 현재 상태 (실측)
 - `@teachermate/shared` v0.13.0, `index.ts` 36 export. `react-router-dom`은 **optional** peer(`package.json:25-29`).
-- 기존(불변 재사용): `hooks/useBeforeUnload.ts`(beforeunload만), `components/useDirtyGuard.tsx`(DirtyGuardProvider/useDirtyGuardContext), `components/BackToSessions.tsx`(audience별 confirm+navigate), `components/ConfirmModal.tsx`.
+- 기존(불변): `hooks/useBeforeUnload.ts`(beforeunload만 — **새 훅은 이를 쓰지 않고 자체 beforeunload 핸들러를 등록**, Plan R9), `components/useDirtyGuard.tsx`, `components/BackToSessions.tsx`, `components/ConfirmModal.tsx`(ExitGuardModal이 재사용).
 - 테스트: `tests/*.test.tsx` vitest+jsdom, `tests/useBeforeUnload.test.tsx` 패턴 보유. `npm test` = `vitest run --environment jsdom`.
 - 레퍼런스 패턴: block-design `src/pages/DesignPage.tsx:48-62`(pushState+popstate), ar-storybook `src/pages/Create.tsx:103-109`(useBlocker — 채택 안 함).
 
@@ -36,7 +36,7 @@
 - **SC-8** `grep -c "releaseAndNavigate" hooks/useExitGuard.ts` ≥ 1.
 - **SC-9** `grep -c "import\.meta\.env\.DEV" hooks/useExitGuard.ts` ≥ 1 (라우트당1개 DEV 경고 — codex R12).
 - **SC-10** `grep -c "history.back" hooks/useExitGuard.ts` 의 호출 분기는 serializedRelease 경로에만(일반 disarm/언마운트 cleanup에는 없음). 코드 리뷰 + 테스트로 검증(grep만으론 분기 위치 판정 불가 → 테스트 SC-T6/T7가 실증).
-- **SC-11** `grep -c "useBeforeUnload" hooks/useExitGuard.ts` 호출 시 인자에 `released`(또는 ref) 게이트 결합 — 코드 리뷰 + 테스트 SC-T8.
+- **SC-11** beforeunload는 **자체 핸들러 + 동기 ref 게이팅**(Plan R9 — `useBeforeUnload(when && !released)` state 의존 경로 **금지**). 검증: `grep -c "addEventListener('beforeunload'" hooks/useExitGuard.ts` ≥ 1 **그리고** 핸들러 본문이 이벤트 시점 `releasedRef.current`(+`when`)를 읽음(코드 리뷰) + serializedRelease가 cb 전 removeEventListener/disposer 호출. `grep -c "useBeforeUnload" hooks/useExitGuard.ts` = **0**(새 훅은 기존 useBeforeUnload에 의존하지 않음). 동기 disarm 실증 = 테스트 SC-T8.
 
 ### STEP 2 — `components/ExitGuardModal.tsx` 신규 (옵션 companion)
 ConfirmModal 래퍼. `{promptOpen, confirmExit, cancelExit, audience?}` 받아 BackToSessions와 동일 카피로 ConfirmModal 렌더.
@@ -53,7 +53,7 @@ ConfirmModal 래퍼. `{promptOpen, confirmExit, cancelExit, audience?}` 받아 B
 Plan 테스트 매트릭스 전 행을 jsdom popstate dispatch로 구현. 아래 §6.5 AC와 1:1.
 - **SC-18** `test -f tests/useExitGuard.test.tsx` = 존재.
 - **SC-19** `npm run typecheck` EXIT=0.
-- **SC-20** `npm test` EXIT=0, useExitGuard 테스트 **전 케이스 pass**(SC-T1~T14 아래).
+- **SC-20** `npm test` EXIT=0, useExitGuard 테스트 **전 케이스 pass**(SC-T1~T22 아래, Plan 매트릭스 1:1).
 
 ### STEP 5 — `package.json` version bump
 - **SC-21** `grep '"version": "0.14.0"' package.json` = 1.
@@ -73,8 +73,13 @@ export interface UseExitGuardReturn {
 }
 export function useExitGuard(opts: UseExitGuardOptions): UseExitGuardReturn;
 ```
-- `confirmExit`·`releaseAndNavigate`는 **동일 내부 `serializedRelease(cb)`**(releasing flag → 소유 시 history.back() → one-shot popstate/timeout fallback → terminal disarm(releasedRef/popstate listener/beforeunload) → cb 정확히 1회).
-- history.back()을 부르는 곳은 **serializedRelease 1군데뿐**. 일반 disarm·언마운트는 listener/타이머 제거만.
+- `confirmExit`·`releaseAndNavigate`는 **동일 내부 `serializedRelease(cb)`**. 순서는 **Plan ADR-1 부속 7과 정확히 일치(terminal disarm을 sentinel 소비 전에)**:
+  1. `releasedRef.current = true` 동기 set
+  2. **메인 popstate 핸들러 제거/바이패스**(이후 back()이 내는 popstate로 prompt 재오픈·재push 안 됨)
+  3. **beforeunload 동기 disarm**(자체 핸들러 removeEventListener 또는 releasedRef 게이트로 이벤트시점 무력화)
+  4. `promptOpen=false` clear
+  5. **소유(`ownsSentinelRef`)일 때만** `history.back()`으로 sentinel 소비 → **one-shot release 리스너**가 popstate 완료 확인(또는 timeout fallback) → cb **정확히 1회**. 비소유면 await 없이 cb 즉시 1회.
+- history.back()을 부르는 곳은 **serializedRelease 1군데뿐**. 일반 disarm·언마운트는 listener/타이머 제거만(back 금지).
 
 ## §6 UX 흐름
 1. 교사/학생이 가드 화면(세션 진행/학생 빌더 등)에서 미저장(when=true) 상태로 **브라우저/하드웨어 뒤로가기** → 확인 모달(promptOpen) → "나가기"=onConfirmExit / "취소"=잔류.
@@ -97,6 +102,16 @@ export function useExitGuard(opts: UseExitGuardOptions): UseExitGuardReturn;
 - [ ] **SC-T12 (경계)** Given 기존 router history.state(location key 등)가 있을 때, When sentinel을 쌓고 풀어도, Then 그 router 필드가 보존된다.
 - [ ] **SC-T13 (예외)** Given 같은 entry에 다른 활성 가드의 마커가 이미 있으면, When 두 번째 useExitGuard가 마운트되면, Then 자기 sentinel을 덮어쓰지 않고(passive) DEV 모드에서 "라우트당 1개" 경고를 출력한다.
 - [ ] **SC-T14 (예외)** Given passive(비소유) 인스턴스에 popstate가 도달해도, Then prompt·재push·release를 하지 않는다(no-op, owner만 반응).
+- [ ] **SC-T15 (예외)** Given confirmExit 중 같은 뒤로가기 신호가 2번(중복 popstate) 와도, Then onConfirmExit은 정확히 1번만 호출된다.
+- [ ] **SC-T16 (경계)** Given when=true, When 뒤로가기를 연속 2번(double-back) 눌러도, Then 두 번 다 차단돼 화면 밖으로 나가지지 않는다.
+- [ ] **SC-T17 (정상)** Given confirmExit로 이탈 후 목적지에서 브라우저 뒤로가기, Then stale sentinel 없이 정상 이전화면으로 간다.
+- [ ] **SC-T18 (경계)** Given releaseAndNavigate 호출 시 소유 sentinel이 없으면, Then 뒤로가기 대기 없이 navigate가 즉시 1번 실행된다.
+- [ ] **SC-T19 (예외)** Given releaseAndNavigate 중 뒤로가기 신호가 안 오거나(누락) 2번(중복) 와도, Then navigate는 정확히 1번 실행된다(대비책·latch).
+- [ ] **SC-T20 (경계)** Given 가드 화면에서 내부 navigate/Link로 새 라우트가 push된 뒤 언마운트되면(소유권 마커≠내 uid), Then cleanup이 history.back을 부르지 않아 새 라우트가 유지된다(루프 없음).
+- [ ] **SC-T21 (경계)** Given 프로그램적 redirect로 새 라우트 push 후 언마운트, Then 동일하게 history.back 미실행·redirect 목적지 유지.
+- [ ] **SC-T22 (경계, bounded)** Given releaseAndNavigate를 안 거치고 생 navigate로 떠난 뒤 목적지에서 브라우저 뒤로가기로 stale entry(가드 URL)에 착지하면, Then 그 화면이 remount되고(when=true면) 재arm되며 sentinel은 마운트당 ≤1(무한 중복 0)·listener-less phantom 없음.
+
+> **1:1 추적성(codex SDD R1 [high])**: 위 SC-T1~T22가 Plan 테스트 매트릭스 전 행을 빠짐없이 커버. 매핑 — T1=리렌더 idempotent / T2=뒤로가기 차단·재push / T3=cancel 반복 / T4=confirmExit ordering / T5=confirmExit fallback / T15=confirmExit 중복 popstate / T16=double-back / T17=confirmExit 후 Back / T6=when→false 일반disarm / T7=언마운트 / T8=동기 beforeunload disarm·location.assign / T9=release 후 popstate no-op·재진입 / T10=releaseAndNavigate ordering / T11=releaseAndNavigate 후 Back / T18=releaseAndNavigate 무소유 즉시 / T19=releaseAndNavigate 누락·중복 / T12=router state 보존 / T13=중첩 가드 DEV 경고 / T14=passive no-op / T20=내부push→언마운트 소유권skip / T21=redirect→언마운트 / T22=미조정 생navigate stale bounded.
 
 ## §7 구현 노트 의무
 본 PR은 IMPLEMENTATION-NOTES-POLICY 적용 대상. Generator는 `docs/implementation-notes/PR-pending-useexitguard.md`에 Decisions/Changes/Tradeoffs/Notes 4섹션을 STEP마다 누적 갱신.
