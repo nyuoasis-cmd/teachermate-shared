@@ -60,7 +60,9 @@
 4. **cancelExit** — 모달만 닫음. 2번에서 이미 sentinel이 재push되어 있으므로 추가 history 조작 없음(중복 방지).
 5. **`when`이 true→false** — **소유권 체크 통과 시에만** sentinel 소비(history 보정), 통과 못하면 보정 생략. popstate listener 제거. 잔여 entry 0.
 6. **언마운트** — cleanup에서 listener/ref 제거 + **소유권 체크 통과 시에만** 미소비 sentinel 보정. 내부 navigate/redirect로 인한 언마운트(=새 라우트가 이미 push됨)면 소유 entry가 아니므로 back() 미실행 → **새 라우트 전환을 건드리지 않음**.
-7. **releaseAndNavigate(navigate)(코디네이트된 내부 이탈, async 직렬화 — codex R3·R4 [high] 반영)** — 앱이 가드 화면에서 내부 navigate/redirect로 나갈 때 `releaseAndNavigate(() => navigate('/dest'))` 형태로 호출. 동작: (a) 소유 sentinel이 현재 entry이면 — "releasing" 플래그 set(이 popstate는 prompt 미표시) → `history.back()` → **one-shot popstate 핸들러**가 traversal 완료를 확인한 시점에 listener 정리 후 `navigate()` 콜백 실행 → 스택 `[…, A, B]` 클린. (b) 소유 sentinel이 아니면 — 기다릴 traversal 없으므로 즉시 `navigate()` 실행. **`history.back()`이 비동기라 동기 소비를 가정하지 않는다.**
+7. **releaseAndNavigate(navigate)(코디네이트된 내부 이탈, async 직렬화 + fallback — codex R3·R4·R5 [high]/[medium] 반영)** — 앱이 가드 화면에서 내부 navigate/redirect로 나갈 때 `releaseAndNavigate(() => navigate('/dest'))` 형태로 호출. 동작: (a) 소유 sentinel이 현재 entry이면 — "releasing" 플래그 set(이 popstate는 prompt 미표시) → `history.back()` → **one-shot popstate 핸들러**가 traversal 완료를 확인한 시점에 listener 정리 후 `navigate()` 콜백 실행 → 스택 `[…, A, B]` 클린. (b) 소유 sentinel이 아니면 — 기다릴 traversal 없으므로 즉시 `navigate()` 실행. **`history.back()`이 비동기라 동기 소비를 가정하지 않는다.**
+   - **navigate 콜백은 정확히 1회 실행(idempotent latch)** — 이미 실행됐으면 재실행 금지.
+   - **fallback(누락/중복 popstate 방지, codex R5 [medium])** — (a) 경로에서 `history.back()` 후 popstate가 일정 시간(예: setTimeout ~50ms microtask/macrotask) 내 안 오거나, back 가용성이 의심되면(`history.length`/state 마커 검사), **fallback이 one-shot 핸들러를 떼고 navigate를 1회 실행**. 중복 popstate가 와도 latch로 navigate는 1회. → "listener는 대기 중인데 콜백이 영영 안 와서 사용자가 가드 페이지에 갇히는" dead-exit 원천 차단.
 8. **누수 한정(정직한 계약)** — "잔여 sentinel 0"은 다음에서만 보장: cancel/confirm·소유 entry 유지한 clean 언마운트·**releaseAndNavigate 경유** 내부 이탈. releaseAndNavigate를 **안 거치고** 생 navigate한 미조정 경로는 stale sentinel 1개가 스택 중간에 남을 수 있음(History API는 중간 entry 삭제 불가). 단 **bounded**: ① idempotent 재arm으로 마운트당 sentinel 최대 1개(무한 중복 금지) ② 목적지에서 브라우저 Back으로 stale entry(=가드 화면 URL) 착지 시 가드 화면 remount + 재arm(새 listener)되어 phantom listener-less 상태 없음. → 그래서 **슬라이스 1 AC**: 가드 화면의 모든 내부 이탈 경로는 releaseAndNavigate 경유.
 9. **호출자 책임 명확화** — `onConfirmExit`/`releaseAndNavigate`의 navigate 콜백이 "실제 이탈 동작"(navigate/leave)을 담당. 훅은 history/모달 상태·직렬화만 관리.
 
@@ -80,6 +82,8 @@
 | **releaseAndNavigate(navigate) 순서 보장** | navigate 콜백이 history.back() popstate **완료 후에만** 실행됨(동기 호출 즉시 X). 직렬화 ordering 검증 |
 | **releaseAndNavigate 후 목적지서 브라우저 Back** | traversal 완료 후 스택 `[…,A,B]` → Back은 A로(클린), stale sentinel 없음 |
 | **releaseAndNavigate: 소유 sentinel 없는 경우** | back() 대기 없이 navigate 즉시 실행 |
+| **popstate 누락(fallback)** | back 후 popstate 미도달 시 timeout fallback이 listener 떼고 navigate **1회** 실행(dead-exit 없음) |
+| **중복 popstate** | latch로 navigate **정확히 1회**만 실행 |
 | **미조정 생 navigate→목적지서 브라우저 Back** | stale entry(가드 URL) 착지 시 가드 화면 remount + 재arm(listener 부착), sentinel 마운트당 ≤1(무한 중복 0), phantom listener-less 상태 없음 |
 
 ### ADR-2: 기존 DirtyGuard/ConfirmModal 재사용, 신규 상태머신 금지
@@ -105,6 +109,15 @@
   추가로 `useBeforeUnload(when)`을 내부 호출해 탭 닫기(보조)도 함께 커버.
 - **Alternatives** — 훅이 모달까지 렌더(JSX 반환) → 거부(훅은 JSX 반환 안 함, React 규약). 대신 옵션 컴포넌트 `<ExitGuardModal {...guard} />` 제공.
 - **Consequences** — ar-storybook의 `{blocker.state}` 패턴과 유사한 사용성. 앱은 `const guard = useExitGuard({when, onConfirmExit}); ... <ExitGuardModal {...guard} />`.
+
+### ADR-5: 채택 안전성 — 미조정 내부 이탈을 "수용된 한정 리스크"로 명시 + 슬라이스 1 인벤토리 blocking (codex R5 [high] 반영)
+- **Context** — popstate 방식(라우터 무관)은 임의의 SPA 내부 네비를 자동 차단하지 못하므로, 정확성이 "각 앱이 내부 이탈을 releaseAndNavigate로 감싼다"는 호출자 규율에 의존. 한 경로라도 빠지면 stale sentinel/유실보호 우회 가능. (대안=router-aware 어댑터/useBlocker는 ADR-1/4에서 optional-peer·라우터 마이그레이션 ripple로 거부.)
+- **Decision** — 이 한정을 **숨기지 않고 수용된 설계 한계로 문서화**하고, footgun을 다음으로 완화:
+  1. **단일 정식 패턴** — 가드 화면의 **모든** 내부 이탈은 `releaseAndNavigate(() => navigate(...))` 하나로 통일(생 navigate 금지). SDD에 "가드 화면 내 raw `navigate(`/`<Link ` 0건" 류 grep 가능 계약 + (가능하면) lint 규칙 후보.
+  2. **슬라이스 1 인벤토리 = blocking 선결조건** — 각 앱 PR은 그 앱의 Link/navigate/header/redirect 이탈 경로 전수 인벤토리 + 각 경로 커버(confirm 또는 releaseAndNavigate) + 테스트를 **AC로 통과해야** 그 앱이 "가드 적용됨"으로 인정. 슬라이스 0은 **contract/primitive 제공까지만**이고 "앱 적용 완료"를 주장하지 않음.
+  3. **bounded 잔여(ADR-1 부속 8)** — 미조정 경로가 남아도 무한 중복 없음·remount 재arm. ⚠️ 단 redirect/auth-gated/route-loader로 **가드 화면이 remount되지 않는** 경우엔 재arm이 보장되지 않을 수 있음 → 그런 경로는 슬라이스 1 인벤토리에서 **반드시** releaseAndNavigate 또는 confirm으로 명시 커버(자동 안전 가정 금지).
+- **Alternatives** — router-aware 어댑터 즉시 구현(거부: ripple·optional peer), 인벤토리 없이 "알아서 안전" 주장(거부: codex 지적 = 취약).
+- **Consequences** — 슬라이스 0 표면 최소 유지. 대신 슬라이스 1이 단순 "import" 아니라 **앱별 이탈경로 감사+테스트**라는 실질 작업임을 못박음(에픽 구조 반영).
 
 ### ADR-4: Data Router 앱을 위한 전방호환 확장점 (codex R1 [medium] 반영)
 - **Context** — popstate-only는 Data Router 앱에서 useBlocker 대비 약함(앱 내부 navigate 미차단). 지금 useBlocker를 박으면 optional peer 위반·라우터 마이그레이션 강제(거부됨).
@@ -136,7 +149,7 @@
 | 슬라이스 | 레포 | 내용 | 의존 |
 |---------|------|------|------|
 | **0 (이번)** | teachermate-shared | `useExitGuard` + ExitGuardModal + export + test + v0.14.0 | — |
-| 1 | 7앱 각각 | 뒤로가기 가드 적용(전무 6앱 + beforeunload→승격). 비소비 4앱은 dep 추가 선행 | 0 머지·published |
+| 1 | 7앱 각각 | 뒤로가기 가드 적용(전무 6앱 + beforeunload→승격). 비소비 4앱 dep 추가 선행. **+앱별 내부 이탈경로 전수 인벤토리+커버+테스트(blocking AC, ADR-5)** | 0 머지·published |
 | 2 | data-class 등 | 교사 공통 네비 복구(§9.H-19) — **별개 정책, useExitGuard 무관** | — |
 | 3 | 다수 | 복귀 링크(← 수업 목록/나가기) 보강 | 0(BackToSessions) |
 > 슬라이스 1~3은 각각 **독립 레포 PR**이므로 별도 blueprint/AO 런으로 진행(jery 결정: 슬라이스 0 먼저 단독). Stacked PR 없음 — 슬라이스 0 머지 후 각 앱이 `npm install`로 `#main` 갱신.
