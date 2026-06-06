@@ -54,9 +54,9 @@
 
 ### ADR-1 부속: sentinel 생명주기 계약 (슬라이스 0에서 확정 — 모든 앱 슬라이스가 import하는 contract)
 > **소유권 원칙(codex R2 [high] 반영)**: sentinel push 시 `history.state`에 **유니크 마커**를 심되 **기존 router 소유 state를 보존(merge)하고 URL을 유지**한다(codex R9 [high]): `history.pushState({ ...history.state, __tmExitGuard: <uid> }, '', window.location.href)`. uid는 훅 인스턴스별 ref(마운트마다 유니크 — StrictMode 이중호출에도 구분되게 생성). ⚠️ `{__tmExitGuard:uid}`만 넘기면 BrowserRouter/Data Router의 location key·navigation index가 날아가 router pop이 오동작하므로 **반드시 spread merge**. **어떤 history.back() 보정도, 호출 직전 `history.state?.__tmExitGuard === <자기 uid>`(=현재 entry가 내가 소유한 sentinel)일 때만 실행한다.** 소유 entry가 아니면 back()을 **호출하지 않고** listener/ref만 정리.
-> **충돌 경계(중첩 가드·StrictMode·타 버전 — codex R10 [medium])**: arm 직전 현재 entry에 **다른** 활성 uid의 `__tmExitGuard`가 이미 있으면 — **내 sentinel을 새로 push하지 않고**(덮어쓰기 금지) 외부 가드가 그 entry를 소유한 것으로 간주, 나는 listener만 부착(back 보정은 내 uid 소유 entry에서만 일어나므로 안전). 즉 `__tmExitGuard`는 flat 덮어쓰기가 아니라 **소유 uid 비교 기반**으로 다룬다. 중첩 가드 화면에서도 ownership/cleanup 판단이 뒤섞이지 않음.
+> **충돌 경계 + 단일 소유자 중재(중첩 가드·StrictMode·타 버전 — codex R10 [medium]·R11 [high])**: 각 인스턴스는 `ownsSentinelRef`(소유 여부)를 둔다. arm 직전 현재 entry에 **다른** 활성 uid의 `__tmExitGuard`가 있으면 — **내 sentinel을 push하지 않고**(덮어쓰기 금지) `ownsSentinelRef=false`로 **passive(비활성)** 상태가 된다. **passive 인스턴스는 popstate에서 prompt 열기·재push·release·back 보정을 일절 하지 않는다(완전 no-op).** 내가 직접 sentinel을 push해 소유했을 때만 `ownsSentinelRef=true`. **모든 popstate 처리(prompt/repush)·serializedRelease back 보정은 `ownsSentinelRef.current===true`로 게이팅** → owner 1명만 차단/재push/release. 비-owner가 owner의 popstate에 반응해 uid를 뒤집는 일 없음. (중첩 시 먼저 arm한 인스턴스가 owner, 나머지는 passive로 화면을 중복 가드하지 않음.)
 1. **단 하나의 sentinel만 유지(idempotent)** — `when`이 false→true로 바뀌는 시점에만 sentinel을 1회 push. 리렌더·동일 `when` 값 반복에서는 추가 push 금지(push 여부 + uid를 ref로 기억).
-2. **차단 시 재push** — popstate로 뒤로가기가 감지되고 `when===true`이면, 확인 모달을 열고 sentinel을 **정확히 1개** 재push(같은 uid)해 사용자를 페이지에 잔류시킴(중복 push 금지).
+2. **차단 시 재push (owner만)** — popstate로 뒤로가기가 감지되고 `when===true` **그리고 `ownsSentinelRef.current===true`(소유자)**일 때만, 확인 모달을 열고 sentinel을 **정확히 1개** 재push(같은 uid)해 사용자를 페이지에 잔류시킴(중복 push 금지). passive(비소유) 인스턴스의 popstate 핸들러는 no-op(codex R11 [high]).
 3. **confirmExit** — **releaseAndNavigate와 동일한 직렬화 release 프리미티브 경유**(codex R6 [high] 반영). 즉 confirmExit = `serializedRelease(onConfirmExit)`: releasing 플래그 set → 소유 entry이면 history.back() → one-shot popstate 또는 timeout fallback 완료 후 `onConfirmExit()` **정확히 1회** 호출(소유 entry 아니면 back 생략·즉시 1회). `history.back()`이 비동기이므로 onConfirmExit을 back 완료 전 동기 호출하지 않는다. 이중 back/잔여 entry 0 보장.
 4. **cancelExit** — 모달만 닫음. 2번에서 이미 sentinel이 재push되어 있으므로 추가 history 조작 없음(중복 방지).
 5. **`when`이 true→false (일반 disarm — 페이지 잔류, codex R10 [high])** — **listener/beforeunload 게이트만 해제. `history.back()` 절대 금지.** dirty→clean(저장 등)으로 가드만 풀리고 사용자는 같은 화면에 머무는 경우 back()을 부르면 **이탈 의도 없이 사용자를 이전 페이지로 끌고 감**(버그). sentinel 소비(back)는 **실제 이탈 의도가 있는 명시적 release 경로(confirmExit/releaseAndNavigate)에서만**. disarm 시 남는 sentinel은 bounded stale(아래 8). `when`이 다시 true가 되면 1번 idempotent 규칙으로 재arm(현재 entry가 이미 내 sentinel이면 재push 안 함).
@@ -87,9 +87,10 @@
 | **router state 보존: arm/rearm/release/back 전 과정** | 기존 history.state(location key 등) 필드가 sentinel push 후에도 생존(spread merge), back traversal 정상 |
 | **일반 disarm(when true→false, 페이지 잔류)** | history.back() **미호출**, 사용자 같은 URL 유지(이전 페이지로 안 끌려감), listener만 해제 |
 | **로컬 UI 언마운트(이탈 아님)** | history.back() **미호출**, URL 불변, listener/타이머 정리 |
-| **중첩 가드/StrictMode: 현재 entry에 다른 활성 uid 마커 존재** | 내 sentinel 미push(덮어쓰기 0), 외부 가드 소유 유지, 내 back 보정은 내 uid에서만 |
+| **중첩 가드/StrictMode: 현재 entry에 다른 활성 uid 마커 존재** | 내 sentinel 미push(덮어쓰기 0), ownsSentinelRef=false(passive), 외부 가드 소유 유지 |
+| **passive(비소유) 인스턴스에 popstate 도달** | prompt 안 열림·재push 0·release 0(완전 no-op), owner만 반응 |
 | double-back(뒤로가기 2연타) | 첫 back에서 차단, 두 번째도 차단(나가지지 않음) |
-| `when` true→false 전환 | listener 제거, 잔여 sentinel 0 |
+| `when` true→false 전환 | history.back() **미호출**, listener/beforeunload 게이트 해제, URL 불변, bounded stale sentinel ≤1 허용(잔여 0 강제 안 함) |
 | 가드 활성 상태로 언마운트 | listener/타이머 제거, back() 미호출(bounded stale 1개 허용), 재진입/리스너 누수 0 |
 | **내부 navigate/Link로 새 라우트 push 후 언마운트** | cleanup이 history.back() **미실행**(소유 entry 아님), 새 라우트 그대로 유지(루프 없음) |
 | **프로그램적 redirect 후 언마운트** | 동일 — 소유권 체크로 back() 생략, redirect 목적지 유지 |
