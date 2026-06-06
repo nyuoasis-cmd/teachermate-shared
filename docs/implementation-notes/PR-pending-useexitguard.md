@@ -16,7 +16,7 @@
 - `hooks/useExitGuard.ts` (신규) — 훅 본체. `UseExitGuardOptions`/`UseExitGuardReturn` 타입 + `useExitGuard()`.
 - `components/ExitGuardModal.tsx` (신규) — ConfirmModal 재사용 래퍼(신규 모달 0). `{promptOpen, confirmExit, cancelExit, audience?, message?}`.
 - `index.ts` — `useExitGuard`/`ExitGuardModal` + 타입 5종 export 추가(기존 export 삭제 0).
-- `tests/useExitGuard.test.tsx` (신규) — SC-T1~T24 전 케이스(jsdom popstate dispatch, history.back 모킹+수동 popstate로 traversal 결정적 제어). 28 it 블록(T19/T23/T24 분할).
+- `tests/useExitGuard.test.tsx` (신규) — SC-T1~T24 전 케이스 + codex 회귀(jsdom popstate dispatch, history.back 모킹+수동 popstate로 traversal 결정적 제어). 45 it 블록(T19/T23/T24 분할 + R1~R11 회귀).
 - `package.json` — version 0.13.0 → 0.14.0.
 
 ## Tradeoffs
@@ -51,7 +51,11 @@
 
 - **R10 = needs-attention** ([high]1, R5 finding2 재제기 = 고정 grace window): *grace 초과 late traversal 미흡수* — codex 권고 #1(정확한 traversal 귀속)은 back()의 popstate를 태깅 불가라 구현 불가, "무한 유지"는 무관한 popstate 하이재킹(더 나쁜 버그). → **codex 권고 #3(fail-closed + observable) 채택: fallback 발화 시 DEV `console.warn`으로 비정상 상황을 관측 가능하게 + SDD 한계절·본 노트에 명문화.** 회귀 **SC-T19k**(fallback→경고). **🔑 master 판단(round cap 10): 잔여(grace 초과 극단 지연 traversal의 물리 위치 어긋남)는 router-agnostic popstate 가드의 본질적 한계로, native 뒤로가기를 취소·귀속할 수 없어 완전 차단 불가 = Plan ADR-4(router 어댑터 deferred)/ADR-5(bounded) 수용 범위의 비치명 edge-of-edge. 정상 환경(<16ms popstate)에선 미발생. Data Router 정밀 차단은 슬라이스의 ADR-4 확장점에서.**
 
+- **R11 = needs-attention** ([high]2, restoreOnFailure 복구 경로 신규 결함 — R10 본질한계와 무관):
+  1. *(high) 실패 복구가 외부 활성 owner를 덮어씀(계약위반)* — `restoreOnFailure`가 `armSentinel()`을 무조건 호출하는데, `armSentinel`은 arm effect와 달리 active-foreign-owner 체크가 없어, passive 인스턴스의 release가 throw/async-reject되면 window-global 레지스트리에 등록된 외부(타 번들) owner 마커를 자기 마커로 덮어씀 → 소유권 게이팅 계약 붕괴(listener 순서 의존). → **수정: `armSentinel`을 소유권-인지화 — 현재 마커가 레지스트리에 등록된 활성 외부 owner면 push 금지·passive 유지.** arm effect의 외부 owner 분기(DEV 경고 포함)는 그대로. 회귀 **SC-T19m**(외부 활성 마커 + passive release async reject → 외부 마커 보존·내 push 0).
+  2. *(high) clean 실패 후 영구 무력화(data-loss 갭)* — `restoreOnFailure`가 `whenRef.current`가 true일 때만 `releasedRef`를 해제 → clean(when=false) 상태에서 `releaseAndNavigate`가 reject/throw되고 컴포넌트가 마운트 유지되면 `releasedRef`가 true로 stuck. 이후 when=false→true(다시 dirty)에서도 arm effect가 `releasedRef` early-return으로 가드를 못 켜 dirty 페이지가 영구 무방비. → **수정: 마운트 상태면 실패 시 `releasedRef`를 when과 무관하게 무조건 해제하고, 현재 dirty(when=true)일 때만 즉시 재arm. (mountedRef 가드로 죽은 인스턴스 재arm은 여전히 방지 — R5.)** 회귀 **SC-T19n**(clean release reject → latch 해제 → when→true 재arm·back 차단).
+
 ## Notes
-- 검증: `npm run typecheck` EXIT 0, `npm test` 12 files / **130 tests passed**(87 baseline + 43 신규, 회귀 0).
+- 검증: `npm run typecheck` EXIT 0, `npm test` 12 files / **132 tests passed**(87 baseline + 45 신규, 회귀 0).
 - baseline(브랜치 clean 시점): 11 files / 87 tests, typecheck EXIT 0 — `qa/blueprint-evidence/useexitguard.*` 참조.
 - 슬라이스 1~3은 별도 레포 PR(별도 blueprint/AO 런). Stacked PR 없음 — 머지 후 각 앱 `npm install`로 `#main` 갱신.

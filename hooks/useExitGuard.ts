@@ -119,14 +119,25 @@ export function useExitGuard(opts: UseExitGuardOptions): UseExitGuardReturn {
     whenRef.current = when;
   });
 
-  /** 내 sentinel을 현재 entry에 push(이미 내 마커면 재소유만). arm 효과·실패 복구 공용 프리미티브. */
+  /**
+   * 내 sentinel을 현재 entry에 push(이미 내 마커면 재소유만). arm 효과·실패 복구 공용 프리미티브.
+   * ⚠️ 소유권-인지: 현재 entry를 다른 활성 가드(레지스트리 등록 마커)가 소유 중이면 덮어쓰지 않고 passive로 남는다
+   *    — restoreOnFailure(실패 복구) 경로가 passive 인스턴스의 async reject 후 외부 owner를 가로채는 계약위반 방지(codex R11 finding1).
+   */
   const armSentinel = useCallback(() => {
     const registry = getRegistry();
-    if (readSentinelMarker() === uidRef.current) {
+    const marker = readSentinelMarker();
+    if (marker === uidRef.current) {
       ownsSentinelRef.current = true;
       registry.add(uidRef.current);
       return;
     }
+    if (typeof marker === 'string' && registry.has(marker)) {
+      // 다른 활성 가드(같은/타 번들)가 이 entry를 소유 → 덮어쓰기 금지, passive 유지(SC-T13c·R11 finding1).
+      ownsSentinelRef.current = false;
+      return;
+    }
+    // 마커 없음 또는 stale(레지스트리에 없는 문자열) → 내 sentinel을 1회 push해 소유.
     window.history.pushState(
       { ...window.history.state, [SENTINEL_KEY]: uidRef.current },
       '',
@@ -153,12 +164,14 @@ export function useExitGuard(opts: UseExitGuardOptions): UseExitGuardReturn {
     ownsSentinelRef.current = false;
     getRegistry().delete(uidRef.current);
 
-    // cb 실패(throw 또는 async reject) → 이탈이 실제로 일어나지 않음. 마운트 유지·여전히 dirty면 가드 재가동(data-loss 방지).
+    // cb 실패(throw 또는 async reject) → 이탈이 실제로 일어나지 않음. 마운트 유지면 release latch를 무조건 해제하고,
+    // 현재 dirty(when=true)면 즉시 가드 재가동. latch 해제를 when과 분리하는 이유: clean(when=false) 상태에서 이탈
+    // 실패 시 releasedRef가 true로 stuck되면, 이후 when=false→true 전환에서도 arm effect가 early-return해 dirty
+    // 페이지가 영구 무방비로 남는 data-loss 갭이 생긴다(codex R11 finding2). mountedRef 가드는 죽은 인스턴스 재arm 방지(R5).
     const restoreOnFailure = () => {
-      if (mountedRef.current && whenRef.current) {
-        releasedRef.current = false;
-        armSentinel();
-      }
+      if (!mountedRef.current) return;
+      releasedRef.current = false; // 이탈 실패 → latch 무조건 해제(clean이어도 후속 when→true 재arm 가능).
+      if (whenRef.current) armSentinel(); // 현재 dirty면 즉시 재가동(소유권-인지 armSentinel).
     };
     // async cb의 거부도 동일 복구 경로로 — () => void 타입이어도 호출자가 async를 넘길 수 있음(codex R6).
     const watchAsync = (result: void | Promise<void>, onFail: () => void) => {

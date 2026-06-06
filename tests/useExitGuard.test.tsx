@@ -688,6 +688,49 @@ describe('useExitGuard — sentinel 생명주기 계약 (SC-T1~T24)', () => {
     expect(nav).toHaveBeenCalledTimes(1);
   });
 
+  // SC-T19m (예외, 실패 복구 소유권-인지 — codex R11 finding1 high) passive 인스턴스의 release가 async reject돼도
+  // 외부 활성 owner 마커를 덮어쓰지 않는다(계약위반 방지).
+  it('SC-T19m: passive 인스턴스의 release가 async reject돼도 외부 활성 owner 마커를 가로채지 않는다', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    // 외부(타 번들) 활성 owner가 이 entry를 소유한 상황.
+    (window as unknown as ExitGuardWindow).__tmExitGuardOwners!.add('foreign-bundle-uid');
+    act(() => {
+      window.history.replaceState({ [SENTINEL_KEY]: 'foreign-bundle-uid' }, '', window.location.href);
+    });
+    render(<Probe when={true} />); // 외부 마커 소유 → passive.
+    expect(sentinelPushCount(pushSpy)).toBe(0); // 마운트 시 덮어쓰기 0.
+    const nav = vi.fn(() => Promise.reject(new Error('async-fail')));
+    act(() => guards.a.releaseAndNavigate(nav)); // owns=false → 즉시 cb(거부 promise).
+    expect(backSpy).not.toHaveBeenCalled();
+    await act(async () => {
+      await Promise.resolve(); // 거부 microtask flush → restoreOnFailure.
+    });
+    expect(nav).toHaveBeenCalledTimes(1);
+    // 실패 복구가 소유권-인지: 외부 owner 마커 그대로, 내 sentinel push 0(계약 유지).
+    expect((window.history.state as Record<string, unknown>)[SENTINEL_KEY]).toBe('foreign-bundle-uid');
+    expect(sentinelPushCount(pushSpy)).toBe(0);
+  });
+
+  // SC-T19n (예외, 실패 후 latch 해제 — codex R11 finding2 high) clean 상태에서 release가 실패하면 release latch를
+  // 무조건 해제해, 이후 when=false→true(다시 dirty)에서 가드가 정상 재가동된다(data-loss 갭 방지).
+  it('SC-T19n: clean 상태에서 release가 reject된 뒤 다시 dirty(when=true)가 되면 가드가 재가동된다', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { rerender } = render(<Probe when={false} />); // clean → arm 안 함(비소유).
+    expect(sentinelPushCount(pushSpy)).toBe(0);
+    const nav = vi.fn(() => Promise.reject(new Error('async-fail')));
+    act(() => guards.a.releaseAndNavigate(nav)); // clean release → owns=false, 즉시 cb(거부 promise).
+    expect(backSpy).not.toHaveBeenCalled();
+    await act(async () => {
+      await Promise.resolve(); // reject flush → restoreOnFailure가 latch 해제(when=false라 즉시 arm은 보류).
+    });
+    expect(nav).toHaveBeenCalledTimes(1);
+    // 이후 편집으로 dirty(when=true) → latch가 stuck이 아니므로 arm effect가 가드를 다시 켠다.
+    rerender(<Probe when={true} />);
+    expect(sentinelPushCount(pushSpy)).toBe(1); // 새 sentinel push(latch 해제 확인).
+    dispatchPopState();
+    expect(guards.a.promptOpen).toBe(true); // 뒤로가기 다시 차단.
+  });
+
   // SC-T1b (정상, StrictMode idempotent) 더블마운트에도 sentinel은 1개만(중복 push 0).
   it('SC-T1b: StrictMode 더블마운트에도 sentinel은 1번만 push된다', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
