@@ -37,5 +37,27 @@ Next steps:
 ```
 (next-step 반영: passive no-op·DEV 경고 테스트 매트릭스 행 이미 포함.)
 
-## Phase 2 (SDD) — verdict
-<!-- Phase 2에서 SDD adversarial-review 결과를 아래 누적 -->
+## Phase 2 (SDD) — 라운드별 verdict 추이
+검토 대상 = `docs/SDD-useexitguard-v1.md`.
+| R | verdict | 핵심 issue → 반영 |
+|---|---------|------------------|
+| R1 | needs-attention | 1:1 매트릭스 주장인데 행 누락 / SC-11이 거부된 useBeforeUnload 경로 유도 / §5 release 순서 Plan 불일치 |
+| R2 | needs-attention | 재진입 confirmExit 전용 AC 없음 / 소유권-skip이 confirmExit 분기 미적용 → SC-T23·T24 추가 |
+| R3 | needs-attention | SC-9 리터럴 `import.meta.env.DEV`가 tsc(types:[react,react-dom]) typecheck 실패 → 빌드호환 typed 캐스트 |
+| R4 | needs-attention | Plan에 빌드깨는 DEV 리터럴 잔존(Plan=단일소스) → Plan 정정 + SC-9b 리터럴 금지 grep-negative |
+| R5 | needs-attention | (환경 아티팩트) codex 샌드박스 `npm test` ENOENT mkdir /tmp/web → **실 환경 실측 반박**: 87 tests PASS·typecheck EXIT0 (증거 .npm-test-baseline.txt). codex가 R6에서 반박 수용 |
+| R6 | needs-attention | SC-T22가 보편적 remount/rearm 안전 과다주장 → 통제 remount 조건부 bounded로 좁힘 + no-remount는 Slice1 |
+| R7 | needs-attention | Plan ADR-1 항목8·매트릭스가 SC-T22와 불일치 → Plan도 동일 qualifier로 정렬 |
+| **R8** | **approve** | **Plan↔SDD↔ADR-5 일관. Slice 0 implementation can start. No material findings.** |
+
+### R5 환경 아티팩트 주의 (메모리 규칙 적용)
+codex 샌드박스의 `npm test` 실패(ENOENT mkdir '/tmp/.../web')는 vitest 캐시 tmp 쓰기 제약 = **샌드박스 아티팩트**. 실 환경 직접 실행 = `npm test` **11 files / 87 tests passed, EXIT=0**, `npm run typecheck` EXIT=0. 증거 = `useexitguard.npm-test-baseline.txt`·`useexitguard.typecheck-baseline.txt`. (게이트 verdict은 실제 도구 실행으로 진실 판정 — fabricate 금지 규칙.)
+
+## Phase 2 최종 verdict (SDD R8) — verbatim
+```
+Verdict: approve
+No remaining ship-blocking contradiction found. Plan ADR-1 item 8, the Plan matrix
+row, SDD SC-T22, and ADR-5 now consistently narrow bounded behavior to controlled
+remount cases and push no-remount redirect/auth/loader raw-navigate paths into
+Slice 1 blocking inventory. Slice 0 implementation can start from this spec.
+```
