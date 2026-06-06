@@ -53,12 +53,13 @@
 - **Consequences** — 장점: 라우터 무관, 검증된 패턴, 단위 테스트 용이, 후속 슬라이스 변경 최소. 단점: ① 앱 내부 `<Link>`/navigate 네비게이션은 막지 않음(아래 "범위 경계" + Out of Scope에서 명시, 슬라이스 1 인벤토리로 보강). ② history에 sentinel entry를 쌓으므로 생명주기를 정확히 관리해야 "뒤로가기 두 번 눌러야 나가짐"·history 무한증가·중복 sentinel 누수를 방지. **이 contract가 슬라이스 0의 핵심 산출물이므로 SDD로 미루지 않고 아래에 박는다(codex R1 [high] 반영).**
 
 ### ADR-1 부속: sentinel 생명주기 계약 (슬라이스 0에서 확정 — 모든 앱 슬라이스가 import하는 contract)
-1. **단 하나의 sentinel만 유지(idempotent)** — `when`이 false→true로 바뀌는 시점에만 sentinel을 1회 push. 리렌더·동일 `when` 값 반복에서는 추가 push 금지(이전 push 여부를 ref로 기억).
-2. **차단 시 재push** — popstate로 뒤로가기가 감지되고 `when===true`이면, 확인 모달을 열고 sentinel을 **정확히 1개** 재push해 사용자를 페이지에 잔류시킴(중복 push 금지).
-3. **confirmExit** — 가드 해제(listener 제거 + 잔류 sentinel 1개를 history.back()으로 소비) 후 `onConfirmExit()` 호출. 이중 back/잔여 entry 0 보장.
+> **소유권 원칙(codex R2 [high] 반영)**: sentinel push 시 `history.state`에 **유니크 마커**를 심는다(예: `history.pushState({ __tmExitGuard: <uid> }, '')`, uid는 훅 인스턴스별 ref). **어떤 history.back() 보정도, 호출 직전 `history.state?.__tmExitGuard === <자기 uid>`(=현재 entry가 내가 소유한 sentinel)일 때만 실행한다.** 소유 entry가 아니면(=앱이 내부 navigate/redirect로 이미 새 라우트를 push함) back()을 **호출하지 않고** listener/ref만 정리. 이로써 out-of-scope인 내부 SPA 네비를 cleanup이 되돌리는 루프를 원천 차단.
+1. **단 하나의 sentinel만 유지(idempotent)** — `when`이 false→true로 바뀌는 시점에만 sentinel을 1회 push. 리렌더·동일 `when` 값 반복에서는 추가 push 금지(push 여부 + uid를 ref로 기억).
+2. **차단 시 재push** — popstate로 뒤로가기가 감지되고 `when===true`이면, 확인 모달을 열고 sentinel을 **정확히 1개** 재push(같은 uid)해 사용자를 페이지에 잔류시킴(중복 push 금지).
+3. **confirmExit** — listener 제거 후, **소유권 체크 통과 시에만** 잔류 sentinel을 history.back()으로 소비하고 `onConfirmExit()` 호출. 소유 entry가 아니면 back() 생략하고 바로 `onConfirmExit()`. 이중 back/잔여 entry 0 보장.
 4. **cancelExit** — 모달만 닫음. 2번에서 이미 sentinel이 재push되어 있으므로 추가 history 조작 없음(중복 방지).
-5. **`when`이 true→false** — sentinel을 소비(history 보정)하고 popstate listener 제거. 잔여 entry 0.
-6. **언마운트** — cleanup에서 listener 제거 + 미소비 sentinel 보정. 가드가 활성인 채 언마운트돼도 history 누수 0.
+5. **`when`이 true→false** — **소유권 체크 통과 시에만** sentinel 소비(history 보정), 통과 못하면 보정 생략. popstate listener 제거. 잔여 entry 0.
+6. **언마운트** — cleanup에서 listener/ref 제거 + **소유권 체크 통과 시에만** 미소비 sentinel 보정. 내부 navigate/redirect로 인한 언마운트(=새 라우트가 이미 push됨)면 소유 entry가 아니므로 back() 미실행 → **새 라우트 전환을 건드리지 않음**. 가드가 활성인 채 언마운트돼도 history 누수 0.
 7. **호출자 책임 명확화** — `onConfirmExit`은 "실제 이탈 동작"(navigate/leave)만 담당. 훅은 history/모달 상태만 관리.
 
 ### 테스트 매트릭스 (슬라이스 0 AC — jsdom popstate dispatch, codex R1 [high] 반영)
@@ -71,6 +72,9 @@
 | double-back(뒤로가기 2연타) | 첫 back에서 차단, 두 번째도 차단(나가지지 않음) |
 | `when` true→false 전환 | listener 제거, 잔여 sentinel 0 |
 | 가드 활성 상태로 언마운트 | history 누수 0, listener 제거 |
+| **내부 navigate/Link로 새 라우트 push 후 언마운트** | cleanup이 history.back() **미실행**(소유 entry 아님), 새 라우트 그대로 유지(루프 없음) |
+| **프로그램적 redirect 후 언마운트** | 동일 — 소유권 체크로 back() 생략, redirect 목적지 유지 |
+| **소유권 체크**: 내부 push 후 history.state.__tmExitGuard ≠ 자기 uid | 모든 back() 보정 분기에서 skip 검증 |
 
 ### ADR-2: 기존 DirtyGuard/ConfirmModal 재사용, 신규 상태머신 금지
 - **Context** — isDirty 추적·확인 모달·나가기 카피가 이미 공유 패키지에 존재.
