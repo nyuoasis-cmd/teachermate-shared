@@ -20,6 +20,7 @@ export { useUndoDelete } from './hooks/useUndoDelete';
 export { useGroupInput } from './hooks/useGroupInput';
 export { usePolling } from './hooks/usePolling';
 export { useBeforeUnload } from './hooks/useBeforeUnload';
+export { useExitGuard } from './hooks/useExitGuard';
 export { useCmdEnter } from './hooks/useCmdEnter';
 export { useIosKeyboardScroll } from './hooks/useIosKeyboardScroll';
 export { EmptyState } from './components/EmptyState';
@@ -32,6 +33,7 @@ export { DirtyGuardProvider, useDirtyGuardContext } from './components/useDirtyG
 export { BackToSessions } from './components/BackToSessions';
 export { DemoSessionShell, useDemoSession } from './components/DemoSessionShell';
 export { RestoreToast } from './components/RestoreToast';
+export { ExitGuardModal } from './components/ExitGuardModal';
 
 export type { FormatRelativeTimeOptions, RelativeTimeMode } from './lib/relative-time';
 export type { ConfirmModalProps } from './components/ConfirmModal';
@@ -52,6 +54,7 @@ export type { UseUndoDeleteOptions, UseUndoDeleteReturn } from './hooks/useUndoD
 export type { UseGroupInputOptions, UseGroupInputReturn } from './hooks/useGroupInput';
 export type { PollingStatus, UsePollingOptions, UsePollingReturn } from './hooks/usePolling';
 export type { UseBeforeUnloadOptions } from './hooks/useBeforeUnload';
+export type { UseExitGuardOptions, UseExitGuardReturn, ExitGuardCallback } from './hooks/useExitGuard';
 export type { UseCmdEnterOptions } from './hooks/useCmdEnter';
 export type { UseIosKeyboardScrollOptions } from './hooks/useIosKeyboardScroll';
 export type { AutosaveIndicatorProps, AutosaveStatus } from './components/AutosaveIndicator';
@@ -66,3 +69,4 @@ export type { DirtyGuardValue, DirtyGuardProviderProps } from './components/useD
 export type { BackToSessionsAudience, BackToSessionsProps } from './components/BackToSessions';
 export type { DemoSessionShellProps } from './components/DemoSessionShell';
 export type { RestoreToastProps, RestoreToastSource } from './components/RestoreToast';
+export type { ExitGuardModalProps, ExitGuardAudience, ExitGuardModalGuardProps } from './components/ExitGuardModal';

@@ -1,0 +1,27 @@
+
+> @teachermate/shared@0.13.0 test
+> vitest run --environment jsdom
+
+
+ RUN  v3.2.4 /home/claude/teachermate-shared
+
+ ✓ tests/AutosaveIndicator.test.tsx (10 tests) 217ms
+ ✓ tests/UploadDropzone.test.tsx (15 tests) 509ms
+ ✓ tests/VerdictGroup.test.tsx (18 tests) 585ms
+ ✓ tests/ToastContainer.test.tsx (6 tests) 218ms
+stderr | tests/DemoSessionShell.test.tsx > DemoSessionShell > toggle(false) POSTs and hides sticky bar; rollback on failure
+The current testing environment is not configured to support act(...)
+
+ ✓ tests/RestoreToast.test.tsx (3 tests) 176ms
+ ✓ tests/DemoSessionShell.test.tsx (3 tests) 213ms
+ ✓ tests/FocusTrap.test.tsx (8 tests) 106ms
+ ✓ tests/useIosKeyboardScroll.test.tsx (6 tests) 66ms
+ ✓ tests/license-inserter.test.ts (6 tests) 138ms
+ ✓ tests/useCmdEnter.test.tsx (7 tests) 88ms
+ ✓ tests/useBeforeUnload.test.tsx (5 tests) 39ms
+
+ Test Files  11 passed (11)
+      Tests  87 passed (87)
+   Start at  19:12:31
+   Duration  8.78s (transform 1.29s, setup 0ms, collect 7.80s, tests 2.35s, environment 10.06s, prepare 1.54s)
+

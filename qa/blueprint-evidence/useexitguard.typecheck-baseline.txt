@@ -1,0 +1,4 @@
+
+> @teachermate/shared@0.13.0 typecheck
+> tsc --noEmit
+
