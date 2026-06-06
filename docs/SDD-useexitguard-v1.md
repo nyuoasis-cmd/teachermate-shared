@@ -53,7 +53,7 @@ ConfirmModal 래퍼. `{promptOpen, confirmExit, cancelExit, audience?}` 받아 B
 Plan 테스트 매트릭스 전 행을 jsdom popstate dispatch로 구현. 아래 §6.5 AC와 1:1.
 - **SC-18** `test -f tests/useExitGuard.test.tsx` = 존재.
 - **SC-19** `npm run typecheck` EXIT=0.
-- **SC-20** `npm test` EXIT=0, useExitGuard 테스트 **전 케이스 pass**(SC-T1~T22 아래, Plan 매트릭스 1:1).
+- **SC-20** `npm test` EXIT=0, useExitGuard 테스트 **전 케이스 pass**(SC-T1~T24 아래, Plan 매트릭스 1:1).
 
 ### STEP 5 — `package.json` version bump
 - **SC-21** `grep '"version": "0.14.0"' package.json` = 1.
@@ -111,7 +111,10 @@ export function useExitGuard(opts: UseExitGuardOptions): UseExitGuardReturn;
 - [ ] **SC-T21 (경계)** Given 프로그램적 redirect로 새 라우트 push 후 언마운트, Then 동일하게 history.back 미실행·redirect 목적지 유지.
 - [ ] **SC-T22 (경계, bounded)** Given releaseAndNavigate를 안 거치고 생 navigate로 떠난 뒤 목적지에서 브라우저 뒤로가기로 stale entry(가드 URL)에 착지하면, Then 그 화면이 remount되고(when=true면) 재arm되며 sentinel은 마운트당 ≤1(무한 중복 0)·listener-less phantom 없음.
 
-> **1:1 추적성(codex SDD R1 [high])**: 위 SC-T1~T22가 Plan 테스트 매트릭스 전 행을 빠짐없이 커버. 매핑 — T1=리렌더 idempotent / T2=뒤로가기 차단·재push / T3=cancel 반복 / T4=confirmExit ordering / T5=confirmExit fallback / T15=confirmExit 중복 popstate / T16=double-back / T17=confirmExit 후 Back / T6=when→false 일반disarm / T7=언마운트 / T8=동기 beforeunload disarm·location.assign / T9=release 후 popstate no-op·재진입 / T10=releaseAndNavigate ordering / T11=releaseAndNavigate 후 Back / T18=releaseAndNavigate 무소유 즉시 / T19=releaseAndNavigate 누락·중복 / T12=router state 보존 / T13=중첩 가드 DEV 경고 / T14=passive no-op / T20=내부push→언마운트 소유권skip / T21=redirect→언마운트 / T22=미조정 생navigate stale bounded.
+- [ ] **SC-T23 (예외, 재진입 — Plan ADR-1부속7/매트릭스 "재진입" 행, codex SDD R2 [high])** Given confirmExit로 이탈 확정 후 onConfirmExit이 ⓐ`history.back()` ⓑ`location.assign(...)` ⓒ지연 router navigate 중 하나를 하고 컴포넌트가 **≥1 tick 마운트 유지**되면, Then **prompt 재오픈 count=0 AND sentinel 재push count=0**(terminal disarm이 메인 popstate/rearm을 이미 껐기 때문). 3개 변형 각각 검증.
+- [ ] **SC-T24 (예외, 소유권-skip 전 분기 — Plan 소유권 원칙, codex SDD R2 [medium])** Given `history.state.__tmExitGuard`가 **다른 uid**로 바뀐 상태에서, When `confirmExit`과 `releaseAndNavigate`를 각각 호출하면, Then **history.back은 호출되지 않고**(비소유라 skip) 콜백(onConfirmExit/navigate)은 **정확히 1번** 실행된다. (back 보정은 모든 serializedRelease 진입점에서 `ownsSentinelRef`·마커 일치 시에만.)
+
+> **1:1 추적성(codex SDD R1/R2 [high])**: 위 SC-T1~T24가 Plan 테스트 매트릭스 + ADR-1부속 계약 전 행을 빠짐없이 커버. 매핑 — T1=리렌더 idempotent / T2=뒤로가기 차단·재push / T3=cancel 반복 / T4=confirmExit ordering / T5=confirmExit fallback / T15=confirmExit 중복 popstate / T16=double-back / T17=confirmExit 후 Back / T6=when→false 일반disarm / T7=언마운트 / T8=동기 beforeunload disarm·location.assign / T9=release 후 popstate no-op / **T23=재진입 confirmExit 3변형(prompt 재오픈0·재push0)** / T10=releaseAndNavigate ordering / T11=releaseAndNavigate 후 Back / T18=releaseAndNavigate 무소유 즉시 / T19=releaseAndNavigate 누락·중복 / T12=router state 보존 / T13=중첩 가드 DEV 경고 / T14=passive no-op / T20=내부push→언마운트 소유권skip / T21=redirect→언마운트 / T22=미조정 생navigate stale bounded / **T24=소유권-skip을 confirmExit·releaseAndNavigate 양쪽 진입점에 적용**.
 
 ## §7 구현 노트 의무
 본 PR은 IMPLEMENTATION-NOTES-POLICY 적용 대상. Generator는 `docs/implementation-notes/PR-pending-useexitguard.md`에 Decisions/Changes/Tradeoffs/Notes 4섹션을 STEP마다 누적 갱신.
