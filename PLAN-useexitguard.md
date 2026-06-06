@@ -56,13 +56,14 @@
 > **소유권 원칙(codex R2 [high] 반영)**: sentinel push 시 `history.state`에 **유니크 마커**를 심는다(예: `history.pushState({ __tmExitGuard: <uid> }, '')`, uid는 훅 인스턴스별 ref). **어떤 history.back() 보정도, 호출 직전 `history.state?.__tmExitGuard === <자기 uid>`(=현재 entry가 내가 소유한 sentinel)일 때만 실행한다.** 소유 entry가 아니면(=앱이 내부 navigate/redirect로 이미 새 라우트를 push함) back()을 **호출하지 않고** listener/ref만 정리. 이로써 out-of-scope인 내부 SPA 네비를 cleanup이 되돌리는 루프를 원천 차단.
 1. **단 하나의 sentinel만 유지(idempotent)** — `when`이 false→true로 바뀌는 시점에만 sentinel을 1회 push. 리렌더·동일 `when` 값 반복에서는 추가 push 금지(push 여부 + uid를 ref로 기억).
 2. **차단 시 재push** — popstate로 뒤로가기가 감지되고 `when===true`이면, 확인 모달을 열고 sentinel을 **정확히 1개** 재push(같은 uid)해 사용자를 페이지에 잔류시킴(중복 push 금지).
-3. **confirmExit** — listener 제거 후, **소유권 체크 통과 시에만** 잔류 sentinel을 history.back()으로 소비하고 `onConfirmExit()` 호출. 소유 entry가 아니면 back() 생략하고 바로 `onConfirmExit()`. 이중 back/잔여 entry 0 보장.
+3. **confirmExit** — **releaseAndNavigate와 동일한 직렬화 release 프리미티브 경유**(codex R6 [high] 반영). 즉 confirmExit = `serializedRelease(onConfirmExit)`: releasing 플래그 set → 소유 entry이면 history.back() → one-shot popstate 또는 timeout fallback 완료 후 `onConfirmExit()` **정확히 1회** 호출(소유 entry 아니면 back 생략·즉시 1회). `history.back()`이 비동기이므로 onConfirmExit을 back 완료 전 동기 호출하지 않는다. 이중 back/잔여 entry 0 보장.
 4. **cancelExit** — 모달만 닫음. 2번에서 이미 sentinel이 재push되어 있으므로 추가 history 조작 없음(중복 방지).
 5. **`when`이 true→false** — **소유권 체크 통과 시에만** sentinel 소비(history 보정), 통과 못하면 보정 생략. popstate listener 제거. 잔여 entry 0.
 6. **언마운트** — cleanup에서 listener/ref 제거 + **소유권 체크 통과 시에만** 미소비 sentinel 보정. 내부 navigate/redirect로 인한 언마운트(=새 라우트가 이미 push됨)면 소유 entry가 아니므로 back() 미실행 → **새 라우트 전환을 건드리지 않음**.
 7. **releaseAndNavigate(navigate)(코디네이트된 내부 이탈, async 직렬화 + fallback — codex R3·R4·R5 [high]/[medium] 반영)** — 앱이 가드 화면에서 내부 navigate/redirect로 나갈 때 `releaseAndNavigate(() => navigate('/dest'))` 형태로 호출. 동작: (a) 소유 sentinel이 현재 entry이면 — "releasing" 플래그 set(이 popstate는 prompt 미표시) → `history.back()` → **one-shot popstate 핸들러**가 traversal 완료를 확인한 시점에 listener 정리 후 `navigate()` 콜백 실행 → 스택 `[…, A, B]` 클린. (b) 소유 sentinel이 아니면 — 기다릴 traversal 없으므로 즉시 `navigate()` 실행. **`history.back()`이 비동기라 동기 소비를 가정하지 않는다.**
    - **navigate 콜백은 정확히 1회 실행(idempotent latch)** — 이미 실행됐으면 재실행 금지.
    - **fallback(누락/중복 popstate 방지, codex R5 [medium])** — (a) 경로에서 `history.back()` 후 popstate가 일정 시간(예: setTimeout ~50ms microtask/macrotask) 내 안 오거나, back 가용성이 의심되면(`history.length`/state 마커 검사), **fallback이 one-shot 핸들러를 떼고 navigate를 1회 실행**. 중복 popstate가 와도 latch로 navigate는 1회. → "listener는 대기 중인데 콜백이 영영 안 와서 사용자가 가드 페이지에 갇히는" dead-exit 원천 차단.
+   - **공용 프리미티브 `serializedRelease(cb)`** — 위 (a)/(b) + latch + fallback 로직을 단일 내부 함수로 추출하고, **confirmExit과 releaseAndNavigate가 모두 이걸 호출**(confirmExit은 cb=onConfirmExit, releaseAndNavigate는 cb=navigate). 두 경로가 같은 직렬화 코드를 공유해 race/exactly-once 동작이 일치(codex R6 [high]).
 8. **누수 한정(정직한 계약)** — "잔여 sentinel 0"은 다음에서만 보장: cancel/confirm·소유 entry 유지한 clean 언마운트·**releaseAndNavigate 경유** 내부 이탈. releaseAndNavigate를 **안 거치고** 생 navigate한 미조정 경로는 stale sentinel 1개가 스택 중간에 남을 수 있음(History API는 중간 entry 삭제 불가). 단 **bounded**: ① idempotent 재arm으로 마운트당 sentinel 최대 1개(무한 중복 금지) ② 목적지에서 브라우저 Back으로 stale entry(=가드 화면 URL) 착지 시 가드 화면 remount + 재arm(새 listener)되어 phantom listener-less 상태 없음. → 그래서 **슬라이스 1 AC**: 가드 화면의 모든 내부 이탈 경로는 releaseAndNavigate 경유.
 9. **호출자 책임 명확화** — `onConfirmExit`/`releaseAndNavigate`의 navigate 콜백이 "실제 이탈 동작"(navigate/leave)을 담당. 훅은 history/모달 상태·직렬화만 관리.
 
@@ -72,7 +73,10 @@
 | `when=true` 진입 → 리렌더 3회 | sentinel push **1회만**(idempotent) |
 | `when=true` + 뒤로가기(popstate) | promptOpen=true, 잔류, sentinel 재push 1개 |
 | 모달에서 cancelExit 반복 2회 | history 길이 불변(중복 push 0), 잔류 |
-| 모달에서 confirmExit | onConfirmExit 1회 호출, 잔여 sentinel 0 |
+| 모달에서 confirmExit | onConfirmExit이 history.back() popstate **완료 후** 호출(동기 즉시 X), 정확히 1회, 잔여 sentinel 0 |
+| confirmExit: popstate 누락(fallback) | timeout fallback이 onConfirmExit 1회 호출(dead-exit 없음) |
+| confirmExit: 중복 popstate | onConfirmExit 정확히 1회 |
+| confirmExit 후 목적지서 브라우저 Back | 잔여 sentinel 없음(클린) |
 | double-back(뒤로가기 2연타) | 첫 back에서 차단, 두 번째도 차단(나가지지 않음) |
 | `when` true→false 전환 | listener 제거, 잔여 sentinel 0 |
 | 가드 활성 상태로 언마운트 | history 누수 0, listener 제거 |
