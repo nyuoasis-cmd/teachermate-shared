@@ -54,7 +54,7 @@ ConfirmModal 래퍼. `{promptOpen, confirmExit, cancelExit, audience?}` 받아 B
 Plan 테스트 매트릭스 전 행을 jsdom popstate dispatch로 구현. 아래 §6.5 AC와 1:1.
 - **SC-18** `test -f tests/useExitGuard.test.tsx` = 존재.
 - **SC-19** `npm run typecheck` EXIT=0.
-- **SC-20** `npm test` EXIT=0, useExitGuard 테스트 **전 케이스 pass**(SC-T1~T24 아래, Plan 매트릭스 1:1).
+- **SC-20** `npm test`(= `vitest run --environment jsdom`) EXIT=0, useExitGuard 테스트 **전 케이스 pass**(SC-T1~T24 아래, Plan 매트릭스 1:1). **baseline 재현성 실측(codex SDD R5 대응)**: 현재 브랜치에서 `npm test`=**11 files / 87 tests passed, EXIT=0**, `npm run typecheck`=EXIT=0 (증거 `qa/blueprint-evidence/useexitguard.npm-test-baseline.txt`·`.typecheck-baseline.txt`). ⚠️ codex 샌드박스가 보고한 `ENOENT mkdir '/tmp/.../web'`는 **vitest 캐시 tmp 쓰기 제약(샌드박스 환경 아티팩트)**으로 레포 결함 아님 — 실 환경에서 게이트 재현됨.
 
 ### STEP 5 — `package.json` version bump
 - **SC-21** `grep '"version": "0.14.0"' package.json` = 1.
