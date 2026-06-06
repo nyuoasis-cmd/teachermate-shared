@@ -123,6 +123,7 @@ export function useExitGuard(opts: UseExitGuardOptions): UseExitGuardReturn;
 ## Slice 0가 보장하지 못하는 것 (한계 — codex SDD R6, Plan ADR-5)
 - **redirect/auth-gated/route-loader로 guard 화면이 remount되지 않는 raw-navigate 이탈** — router 무관 훅 + 앱 라우트 무변경이라 Slice 0가 stale-sentinel 안전을 강제 못 함. → **Slice 1 blocking 인벤토리 의무**: 그런 경로는 releaseAndNavigate 또는 명시적 confirm/useBlocker로 커버해야 그 앱이 "가드 적용됨"으로 인정.
 - bounded stale sentinel(미조정 이탈)은 수용된 한계(Plan ADR-5).
+- **매우 지연된(grace 창 초과) 뒤로가기 traversal의 물리 위치 어긋남 (codex R5/R9/R10, ADR-4/ADR-5 수용)** — `releaseAndNavigate`/`confirmExit`에서 정상적으로는 `history.back()`의 popstate가 즉시(<16ms) 도착해 sentinel 소비 후 cb가 실행된다(경합 없음). 그러나 popstate가 fallback 창(50ms) 내 안 오면 dead-exit 방지를 위해 cb를 먼저 실행하고, late traversal은 grace 창(200ms) 동안 흡수·URL 복원한다. **grace 초과로 도착하는 극단적 지연 traversal(jank/BFCache)은 흡수 못 해 사용자가 목적지에서 밀릴 수 있다.** router-agnostic 훅은 native 뒤로가기를 취소·정확히 귀속할 수 없어 근본적으로 완전 차단 불가 — Data Router 앱의 정밀 차단은 **ADR-4 어댑터 슬라이스(useBlocker 병행)**에서 다룬다. fallback 발화는 DEV `console.warn`으로 **관측 가능(fail-closed 신호)**. 정상 환경에서는 발생하지 않는 edge-of-edge.
 
 ## Out of Scope (SDD 재확인)
 앱 코드 변경 / 4개 비소비 앱 dep 추가 / 앱 내부 이탈경로 인벤토리 / Data Router 어댑터 실구현 / 중첩 dirty 가드 arbiter / 기존 useBeforeUnload·BackToSessions·DirtyGuard 동작 변경 — 전부 범위 밖(Plan Out of Scope).
