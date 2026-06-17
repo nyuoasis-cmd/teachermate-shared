@@ -23,6 +23,7 @@ export { useBeforeUnload } from './hooks/useBeforeUnload';
 export { useExitGuard } from './hooks/useExitGuard';
 export { useCmdEnter } from './hooks/useCmdEnter';
 export { useIosKeyboardScroll } from './hooks/useIosKeyboardScroll';
+export { useImeSafeInput, imeEmitValue } from './hooks/useImeSafeInput';
 export { EmptyState } from './components/EmptyState';
 export { AutosaveIndicator } from './components/AutosaveIndicator';
 export { UploadDropzone } from './components/UploadDropzone';
@@ -57,6 +58,7 @@ export type { UseBeforeUnloadOptions } from './hooks/useBeforeUnload';
 export type { UseExitGuardOptions, UseExitGuardReturn, ExitGuardCallback } from './hooks/useExitGuard';
 export type { UseCmdEnterOptions } from './hooks/useCmdEnter';
 export type { UseIosKeyboardScrollOptions } from './hooks/useIosKeyboardScroll';
+export type { ImeSafeInputHandlers } from './hooks/useImeSafeInput';
 export type { AutosaveIndicatorProps, AutosaveStatus } from './components/AutosaveIndicator';
 export type {
   UploadDropzoneProps,
