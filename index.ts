@@ -5,6 +5,12 @@ export { ToastContainer, showToast } from './components/ToastContainer';
 export { QuotaBadge } from './components/QuotaBadge';
 export { QRButton } from './components/QRButton';
 export { QRFullscreen, qrSizeFor } from './components/QRFullscreen';
+
+// 한결 v2 수업 대시보드 공용 부품 (BUILDER-UX §4 · DESIGN-POLICY §10-A, 2026-08-31 결재)
+export { SessionsHeader } from './components/sessions/SessionsHeader';
+export { SessionCard } from './components/sessions/SessionCard';
+export { CreateSessionModal } from './components/sessions/CreateSessionModal';
+export { StatusPill } from './components/sessions/StatusPill';
 export { GroupInputPanel } from './components/GroupInputPanel';
 export { ReportButton } from './components/ReportButton';
 export { ReportModal } from './components/ReportModal';
@@ -72,3 +78,14 @@ export type { BackToSessionsAudience, BackToSessionsProps } from './components/B
 export type { DemoSessionShellProps } from './components/DemoSessionShell';
 export type { RestoreToastProps, RestoreToastSource } from './components/RestoreToast';
 export type { ExitGuardModalProps, ExitGuardAudience, ExitGuardModalGuardProps } from './components/ExitGuardModal';
+export type { SessionsHeaderProps } from './components/sessions/SessionsHeader';
+export type { SessionCardProps } from './components/sessions/SessionCard';
+export type { CreateSessionModalProps } from './components/sessions/CreateSessionModal';
+export type { StatusPillProps } from './components/sessions/StatusPill';
+export type {
+  SessionSummary,
+  SessionStat,
+  SessionActivity,
+  SessionStatus,
+  StudentStatus,
+} from './components/sessions/types';
