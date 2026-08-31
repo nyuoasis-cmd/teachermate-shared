@@ -11,6 +11,9 @@ export { SessionsHeader } from './components/sessions/SessionsHeader';
 export { SessionCard } from './components/sessions/SessionCard';
 export { CreateSessionModal } from './components/sessions/CreateSessionModal';
 export { StatusPill } from './components/sessions/StatusPill';
+
+// 학생 입장 3단계 (BUILDER-UX §3, E1~E12)
+export { JoinFlow } from './components/join/JoinFlow';
 export { GroupInputPanel } from './components/GroupInputPanel';
 export { ReportButton } from './components/ReportButton';
 export { ReportModal } from './components/ReportModal';
@@ -89,3 +92,4 @@ export type {
   SessionStatus,
   StudentStatus,
 } from './components/sessions/types';
+export type { JoinFlowProps, JoinResult, JoinFailureReason } from './components/join/JoinFlow';
