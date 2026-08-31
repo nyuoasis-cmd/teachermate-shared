@@ -126,14 +126,16 @@ export function QRFullscreen({
       aria-modal="true"
       aria-labelledby="qr-fullscreen-title"
       aria-describedby="qr-fullscreen-hint"
-      className="fixed inset-0 z-[100] overflow-auto bg-white"
+      className="fixed inset-0 z-[100] overflow-auto"
+      style={{ background: 'var(--color-surface)' }}
       onClick={onClose}
     >
       <button
         type="button"
         aria-label="QR 코드 닫기"
         onClick={onClose}
-        className="absolute right-4 top-4 z-10 inline-flex h-11 w-11 items-center justify-center rounded-full text-stone-500 transition hover:bg-stone-100 hover:text-stone-900"
+        className="absolute right-4 top-4 z-10 inline-flex h-11 w-11 items-center justify-center rounded-full transition"
+        style={{ color: 'var(--color-text-muted)' }}
       >
         <X className="h-5 w-5" />
       </button>
@@ -148,18 +150,27 @@ export function QRFullscreen({
         <div className="m-auto flex w-full flex-col items-center text-center">
           <p
             id="qr-fullscreen-title"
-            className="text-base text-stone-500 [word-break:keep-all]"
+            className="text-base [word-break:keep-all]"
+            style={{ color: 'var(--color-text-muted)' }}
           >
             {sessionTitle}
           </p>
 
-          <p className="mt-4 select-all font-mono text-[clamp(96px,18vw,200px)] font-bold leading-none tracking-[0.12em] text-stone-900">
+          <p
+            className="mt-4 select-all text-[clamp(96px,18vw,200px)] font-bold leading-none tracking-[0.12em]"
+            style={{ fontFamily: 'var(--font-mono)', color: 'var(--color-text-primary)' }}
+          >
             {sessionCode}
           </p>
 
           <div
-            className="mt-8 overflow-hidden rounded-2xl border border-stone-200 bg-white p-4 shadow-lg"
-            style={{ width: qrSize + 32, height: qrSize + 32 }}
+            className="mt-8 overflow-hidden rounded-2xl p-4 shadow-lg"
+            style={{
+              width: qrSize + 32,
+              height: qrSize + 32,
+              border: '1px solid var(--color-border)',
+              background: 'var(--color-surface)',
+            }}
           >
             {qrDataUrl ? (
               <img
@@ -168,14 +179,23 @@ export function QRFullscreen({
                 className="h-full w-full rounded-xl"
               />
             ) : (
-              <div className="h-full w-full animate-pulse rounded-xl bg-stone-100" />
+              <div
+                className="h-full w-full animate-pulse rounded-xl"
+                style={{ background: 'var(--color-surface-hover)' }}
+              />
             )}
           </div>
 
           {typeof participantCount === 'number' ? (
             <div className="mt-8 flex items-center gap-3">
-              <span className="h-3 w-3 animate-pulse rounded-full bg-emerald-400" />
-              <span className="text-[clamp(24px,3vw,32px)] font-medium text-stone-600">
+              <span
+                className="h-3 w-3 animate-pulse rounded-full"
+                style={{ background: 'var(--color-success-text)' }}
+              />
+              <span
+                className="text-[clamp(24px,3vw,32px)] font-medium"
+                style={{ color: 'var(--color-text-body)' }}
+              >
                 {participantCount}명 참여 중
               </span>
             </div>
@@ -183,13 +203,19 @@ export function QRFullscreen({
 
           <p
             id="qr-fullscreen-hint"
-            className="mt-6 text-base text-stone-400 [word-break:keep-all] sm:text-xl"
+            className="mt-6 text-base [word-break:keep-all] sm:text-xl"
+            style={{ color: 'var(--color-text-quaternary)' }}
           >
             QR 코드를 스캔하거나 코드를 입력하세요
           </p>
 
           {/* 참여 URL 전문 — QR 을 못 찍는 학생이 직접 칠 수 있게(BUILDER-UX §5) */}
-          <p className="mt-3 break-all font-mono text-xs text-stone-400">{joinUrl}</p>
+          <p
+            className="mt-3 break-all text-xs"
+            style={{ fontFamily: 'var(--font-mono)', color: 'var(--color-text-quaternary)' }}
+          >
+            {joinUrl}
+          </p>
         </div>
       </div>
     </div>
