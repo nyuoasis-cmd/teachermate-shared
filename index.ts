@@ -4,7 +4,7 @@ export { UndoToast } from './components/UndoToast';
 export { ToastContainer, showToast } from './components/ToastContainer';
 export { QuotaBadge } from './components/QuotaBadge';
 export { QRButton } from './components/QRButton';
-export { QRFullscreen } from './components/QRFullscreen';
+export { QRFullscreen, qrSizeFor } from './components/QRFullscreen';
 export { GroupInputPanel } from './components/GroupInputPanel';
 export { ReportButton } from './components/ReportButton';
 export { ReportModal } from './components/ReportModal';

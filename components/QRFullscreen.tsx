@@ -11,11 +11,34 @@ export interface QRFullscreenProps {
   participantCount?: number;
 }
 
-function getQRSize() {
-  if (typeof window === 'undefined') return 280;
-  const w38vw = window.innerWidth * 0.38;
-  const h32vh = window.innerHeight * 0.32;
-  return Math.round(Math.min(w38vw, h32vh, 280));
+/**
+ * DESIGN-POLICY §10 v3 — QR 크기.
+ *
+ * 🚨 고정 px 상한을 두지 않는다. 이 화면은 교실 프로젝터로 쏘는 물건이라
+ * 화면이 커지면 QR 도 같이 커져야 한다. v2 의 `min(38vw, 32vh, 280px)` 는
+ * 폰(390×844)에서는 티가 안 났지만(280 vs 273) 프로젝터(1920×1080)에서
+ * 280 vs 486 = 1.74× 로 조용히 잘렸다.
+ *
+ * 🔑 크기는 여기 한 곳에서만 정한다(§10 v3). TSX 의 size 와 CSS 의 svg width
+ * 두 곳에 두면 한쪽만 고쳐도 화면이 안 바뀐다(brand 2026-08-07 실측 사고).
+ */
+export function qrSizeFor(viewportWidth: number, viewportHeight: number): number {
+  const ratio = viewportWidth < 768 ? 0.7 : 0.45;
+  return Math.round(Math.min(viewportWidth, viewportHeight) * ratio);
+}
+
+/**
+ * 래스터 해상도는 «표시 크기» 와 다른 축이다(§10 v3).
+ * 표시 크기만 키우면 「커졌는데 흐릿하다」로 결함이 모양만 바꾼다(plan 실측).
+ * 표시 최대치를 덮도록 2배로 렌더한다.
+ */
+function qrRenderResolution(displaySize: number): number {
+  return Math.min(2048, Math.max(512, displaySize * 2));
+}
+
+function readQRSize(): number {
+  if (typeof window === 'undefined') return 512;
+  return qrSizeFor(window.innerWidth, window.innerHeight);
 }
 
 export function QRFullscreen({
@@ -26,7 +49,7 @@ export function QRFullscreen({
   joinUrl,
   participantCount,
 }: QRFullscreenProps) {
-  const [qrSize, setQrSize] = useState(() => (typeof window === 'undefined' ? 280 : getQRSize()));
+  const [qrSize, setQrSize] = useState(readQRSize);
   const [qrDataUrl, setQrDataUrl] = useState('');
 
   useEffect(() => {
@@ -34,14 +57,20 @@ export function QRFullscreen({
       return;
     }
 
+    // 🚨 resize 리스너 필수(§10 v3) — 없으면 «열 때 크기» 로 굳는다.
+    // 상한을 지워도 이게 없으면 교사가 창을 옮기거나 폰을 돌렸을 때 그대로다(data-class 실측).
     const updateSize = () => {
-      setQrSize(getQRSize());
+      setQrSize(readQRSize());
     };
 
     updateSize();
     window.addEventListener('resize', updateSize);
+    window.addEventListener('orientationchange', updateSize);
 
-    return () => window.removeEventListener('resize', updateSize);
+    return () => {
+      window.removeEventListener('resize', updateSize);
+      window.removeEventListener('orientationchange', updateSize);
+    };
   }, [open]);
 
   useEffect(() => {
@@ -53,7 +82,7 @@ export function QRFullscreen({
     let cancelled = false;
 
     void QRCode.toDataURL(joinUrl, {
-      width: qrSize,
+      width: qrRenderResolution(qrSize),
       margin: 3,
     }).then((nextUrl) => {
       if (!cancelled) {
@@ -97,55 +126,70 @@ export function QRFullscreen({
       aria-modal="true"
       aria-labelledby="qr-fullscreen-title"
       aria-describedby="qr-fullscreen-hint"
-      className="fixed inset-0 z-[100] bg-white"
+      className="fixed inset-0 z-[100] overflow-auto bg-white"
       onClick={onClose}
     >
       <button
         type="button"
         aria-label="QR 코드 닫기"
         onClick={onClose}
-        className="absolute right-4 top-4 inline-flex h-11 w-11 items-center justify-center rounded-full text-stone-500 transition hover:bg-stone-100 hover:text-stone-900"
+        className="absolute right-4 top-4 z-10 inline-flex h-11 w-11 items-center justify-center rounded-full text-stone-500 transition hover:bg-stone-100 hover:text-stone-900"
       >
         <X className="h-5 w-5" />
       </button>
 
-      <div
-        className="flex min-h-full items-center justify-center px-6 py-10"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <div className="flex w-full max-w-[580px] flex-col items-center text-center">
-        <p id="qr-fullscreen-title" className="text-[clamp(18px,2vw,24px)] text-stone-500 [word-break:keep-all]">{sessionTitle}</p>
-        <p className="mt-4 font-mono text-[clamp(72px,15vw,112px)] font-bold tracking-[0.15em] text-stone-900 select-all">
-          {sessionCode}
-        </p>
+      <div className="flex min-h-full px-6 py-10" onClick={(event) => event.stopPropagation()}>
+        {/*
+          🚨 패널에 max-width 를 두지 않는다(§10 v3).
+          「상한은 QR 에만 있지 않다」 — v2 의 max-w-[580px] 는 QR 상한을 지워도
+          화면이 그대로이게 만드는 두 번째 상한이었다(kospi·architecture·plan 실측).
+          세로 중앙정렬은 place-items:center 가 아니라 margin:auto — 넘칠 때 위가 잘리지 않게.
+        */}
+        <div className="m-auto flex w-full flex-col items-center text-center">
+          <p
+            id="qr-fullscreen-title"
+            className="text-base text-stone-500 [word-break:keep-all]"
+          >
+            {sessionTitle}
+          </p>
 
-        <div
-          className="mt-8 overflow-hidden rounded-[28px] border border-stone-200 bg-white p-4 shadow-lg"
-          style={{ width: qrSize + 32, height: qrSize + 32 }}
-        >
-          {qrDataUrl ? (
-            <img
-              src={qrDataUrl}
-              alt={`${sessionTitle} 참여 QR 코드`}
-              className="h-full w-full rounded-[20px]"
-              width={qrSize}
-              height={qrSize}
-            />
-          ) : (
-            <div className="h-full w-full animate-pulse rounded-[20px] bg-stone-100" />
-          )}
-        </div>
+          <p className="mt-4 select-all font-mono text-[clamp(96px,18vw,200px)] font-bold leading-none tracking-[0.12em] text-stone-900">
+            {sessionCode}
+          </p>
 
-        {typeof participantCount === 'number' ? (
-          <div className="mt-8 flex items-center gap-3">
-            <span className="h-3 w-3 rounded-full bg-emerald-400 animate-pulse" />
-            <span className="text-[clamp(24px,3vw,32px)] font-medium text-stone-600">{participantCount}명 참여 중</span>
+          <div
+            className="mt-8 overflow-hidden rounded-2xl border border-stone-200 bg-white p-4 shadow-lg"
+            style={{ width: qrSize + 32, height: qrSize + 32 }}
+          >
+            {qrDataUrl ? (
+              <img
+                src={qrDataUrl}
+                alt={`${sessionTitle} 참여 QR 코드`}
+                className="h-full w-full rounded-xl"
+              />
+            ) : (
+              <div className="h-full w-full animate-pulse rounded-xl bg-stone-100" />
+            )}
           </div>
-        ) : null}
 
-        <p id="qr-fullscreen-hint" className="mt-6 text-base text-stone-400 [word-break:keep-all] sm:text-xl">
-          QR 코드를 스캔하거나 코드를 입력하세요
-        </p>
+          {typeof participantCount === 'number' ? (
+            <div className="mt-8 flex items-center gap-3">
+              <span className="h-3 w-3 animate-pulse rounded-full bg-emerald-400" />
+              <span className="text-[clamp(24px,3vw,32px)] font-medium text-stone-600">
+                {participantCount}명 참여 중
+              </span>
+            </div>
+          ) : null}
+
+          <p
+            id="qr-fullscreen-hint"
+            className="mt-6 text-base text-stone-400 [word-break:keep-all] sm:text-xl"
+          >
+            QR 코드를 스캔하거나 코드를 입력하세요
+          </p>
+
+          {/* 참여 URL 전문 — QR 을 못 찍는 학생이 직접 칠 수 있게(BUILDER-UX §5) */}
+          <p className="mt-3 break-all font-mono text-xs text-stone-400">{joinUrl}</p>
         </div>
       </div>
     </div>
