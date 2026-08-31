@@ -120,7 +120,11 @@ export function SessionCard({
         opacity: active ? 1 : 0.55,
       }}
     >
-      <div className="flex items-center gap-4">
+      {/* 🩸 좁은 화면에서 «줄바꿈» 이 필요하다. 한 줄로 밀어붙이면 폰(≤414px)에서 제목 폭이 0 이 되어
+          수업 이름이 통째로 사라지고, 360~390px 에서는 상태 pill 위에 QR 버튼이 겹쳐 그려진다
+          (2026-08-31 실측: 390px 겹침 23px · 360px 겹침 53px · 제목 폭 0px).
+          교사가 폰으로 목록을 볼 때 «어느 반인지» 를 못 읽는 화면이었다. */}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
         <div
           className="flex h-[50px] w-[82px] flex-shrink-0 items-center justify-center text-[15px] font-bold tracking-[0.06em]"
           style={{
@@ -133,10 +137,12 @@ export function SessionCard({
           {session.code}
         </div>
 
-        <div className="min-w-0 flex-1">
+        {/* basis 를 두어 «액션이 못 들어올 만큼 좁으면 액션이 다음 줄로» 가게 한다.
+            min-w-0 만으로는 제목이 0 까지 찌그러지는 쪽이 먼저 일어난다. */}
+        <div className="min-w-0 flex-1 basis-[180px]">
           <div className="flex items-center gap-2">
             <h3
-              className="truncate text-base font-semibold"
+              className="min-w-0 truncate text-base font-semibold"
               style={{ color: 'var(--color-text-primary)' }}
             >
               {session.title}
@@ -151,7 +157,7 @@ export function SessionCard({
         </div>
 
         {/* 액션 순서 = QR → 종료 → 삭제(종료 카드에만). §10-A */}
-        <div className="flex flex-shrink-0 items-center gap-2">
+        <div className="ml-auto flex flex-shrink-0 items-center gap-2">
           {active && onQR ? (
             <button
               type="button"
