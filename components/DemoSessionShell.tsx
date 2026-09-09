@@ -6,7 +6,17 @@ export interface DemoSessionShellProps {
   showMirror?: boolean;
   children: ReactNode;
   fetchImpl?: typeof fetch;
+  /**
+   * 🚨 시연 데이터의 수명을 화면에 적는 문구. **앱마다 수명 정책이 다르다.**
+   * 기본값은 「종료 시 지운다」인데, 끝내도 안 지우는 정책(예: usertest v1.11)을 쓰는 앱이
+   * 이걸 그대로 두면 **화면이 거짓말을 한다**. 그런 앱은 자기 정책 문구를 반드시 넘긴다.
+   * 빈 문자열을 주면 문구 자체를 뺀다.
+   */
+  dataLifetimeNote?: string;
 }
+
+/** 기본 문구 = 「종료 시 삭제」 정책. 이 부품의 원래 소비자들이 쓰던 값이라 기본값으로 남긴다. */
+export const DEFAULT_DEMO_LIFETIME_NOTE = '데이터는 시연 종료 시 모두 삭제됩니다';
 
 interface DemoSessionContextValue {
   isDemo: boolean;
@@ -26,14 +36,18 @@ export function useDemoSession(): DemoSessionContextValue {
   return ctx;
 }
 
-function DemoStickyBar({ onEnd }: { onEnd: () => void }) {
+function DemoStickyBar({ onEnd, lifetimeNote }: { onEnd: () => void; lifetimeNote: string }) {
   return (
     <div className="demo-sticky" role="status" aria-live="polite" data-demo-bar="true">
       <div className="flex items-center justify-between gap-3 px-4 py-2">
         <div className="flex items-center gap-2 text-sm font-medium text-amber-900">
           <span aria-hidden="true">●</span>
           <span>교사 시연 모드</span>
-          <span className="text-xs text-amber-700">데이터는 시연 종료 시 모두 삭제됩니다</span>
+          {lifetimeNote ? (
+            <span className="text-xs text-amber-700" data-demo-lifetime-note="true">
+              {lifetimeNote}
+            </span>
+          ) : null}
         </div>
         <button
           type="button"
@@ -63,6 +77,7 @@ export function DemoSessionShell({
   showMirror = false,
   children,
   fetchImpl = fetch,
+  dataLifetimeNote = DEFAULT_DEMO_LIFETIME_NOTE,
 }: DemoSessionShellProps) {
   const [isDemo, setIsDemo] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -120,7 +135,7 @@ export function DemoSessionShell({
 
   return (
     <DemoSessionContext.Provider value={value}>
-      {isDemo ? <DemoStickyBar onEnd={() => void toggle(false)} /> : null}
+      {isDemo ? <DemoStickyBar onEnd={() => void toggle(false)} lifetimeNote={dataLifetimeNote} /> : null}
       {showMirror && isDemo ? <StudentMirror sessionCode={sessionCode} /> : null}
       {children}
     </DemoSessionContext.Provider>

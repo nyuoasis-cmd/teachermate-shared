@@ -41,7 +41,7 @@ export { FocusTrap } from './components/FocusTrap';
 export { RouteScrollTop } from './components/RouteScrollTop';
 export { DirtyGuardProvider, useDirtyGuardContext } from './components/useDirtyGuard';
 export { BackToSessions } from './components/BackToSessions';
-export { DemoSessionShell, useDemoSession } from './components/DemoSessionShell';
+export { DemoSessionShell, useDemoSession, DEFAULT_DEMO_LIFETIME_NOTE } from './components/DemoSessionShell';
 export { RestoreToast } from './components/RestoreToast';
 export { ExitGuardModal } from './components/ExitGuardModal';
 

@@ -3,7 +3,11 @@
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { DemoSessionShell, useDemoSession } from '../components/DemoSessionShell';
+import {
+  DemoSessionShell,
+  useDemoSession,
+  DEFAULT_DEMO_LIFETIME_NOTE,
+} from '../components/DemoSessionShell';
 
 afterEach(() => {
   cleanup();
@@ -92,5 +96,51 @@ describe('DemoSessionShell', () => {
     await waitFor(() => {
       expect(screen.getByTestId('probe').textContent).toBe('|off|-');
     });
+  });
+});
+
+// 🚨 수명 문구는 앱마다 다르다 — 기본값을 못 바꾸면 「끝내도 안 지운다」 정책을 쓰는 앱에서
+//    배너가 거짓말을 한다(usertest v1.11). 아래 셋이 그 이빨이다.
+describe('DemoSessionShell — 데이터 수명 문구', () => {
+  function demoOnFetch() {
+    return vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ is_demo: true }),
+    }) as unknown as typeof fetch;
+  }
+
+  it('기본값은 「종료 시 삭제」 문구다 (기존 소비자 그대로)', async () => {
+    render(
+      <DemoSessionShell sessionCode="ABC123" fetchImpl={demoOnFetch()}>
+        <div />
+      </DemoSessionShell>,
+    );
+    await waitFor(() => expect(screen.getByText(DEFAULT_DEMO_LIFETIME_NOTE)).toBeTruthy());
+  });
+
+  it('앱이 자기 수명 정책을 넘기면 그 문구가 나오고 기본 문구는 사라진다', async () => {
+    render(
+      <DemoSessionShell
+        sessionCode="ABC123"
+        fetchImpl={demoOnFetch()}
+        dataLifetimeNote="시연을 끝내도 데이터는 지워지지 않습니다"
+      >
+        <div />
+      </DemoSessionShell>,
+    );
+    await waitFor(() =>
+      expect(screen.getByText('시연을 끝내도 데이터는 지워지지 않습니다')).toBeTruthy(),
+    );
+    expect(screen.queryByText(DEFAULT_DEMO_LIFETIME_NOTE)).toBeNull();
+  });
+
+  it('빈 문자열이면 문구 자체가 없다', async () => {
+    render(
+      <DemoSessionShell sessionCode="ABC123" fetchImpl={demoOnFetch()} dataLifetimeNote="">
+        <div />
+      </DemoSessionShell>,
+    );
+    await waitFor(() => expect(screen.getByText('교사 시연 모드')).toBeTruthy());
+    expect(document.querySelector('[data-demo-lifetime-note]')).toBeNull();
   });
 });
