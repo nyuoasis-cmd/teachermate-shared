@@ -38,19 +38,26 @@ const endedSession: SessionSummary = {
 };
 
 /**
- * D5 — 삭제는 종료된 카드에만.
- * 🩸 이 결정의 이유는 수업 중 실수 클릭이다. 「onDelete 를 안 넘기면 되지」로는
- * 못 막는다 — 앱이 넘기는 순간 진행 중 카드에 뜨기 때문이다. 부품이 거절해야 한다.
+ * §10-A v2.2(2026-09-14) — 삭제는 진행 중·종료 공통(구 D5 「종료된 카드에만」 폐기).
+ * 🔑 넘기면 그린다. 수업 중 실수 클릭은 앱의 확인 모달(§9.H-17 데이터 영향 문구)이 막는다.
  */
-describe('SessionCard — D5 삭제 버튼 위치', () => {
-  it('진행 중 카드는 onDelete 를 넘겨도 삭제를 그리지 않는다', () => {
-    render(<SessionCard session={activeSession} onOpen={() => {}} onDelete={() => {}} onQR={() => {}} onEnd={() => {}} />);
-    expect(screen.queryByText('삭제')).toBeNull();
+describe('SessionCard — 삭제 버튼 위치 (§10-A v2.2)', () => {
+  it('진행 중 카드에도 onDelete 를 넘기면 삭제가 나온다 — 순서 QR → 종료 → 삭제', () => {
+    const { container } = render(
+      <SessionCard session={activeSession} onOpen={() => {}} onDelete={() => {}} onQR={() => {}} onEnd={() => {}} />,
+    );
+    const buttonLabels = Array.from(container.querySelectorAll('button')).map((b) => b.textContent?.trim());
+    expect(buttonLabels).toEqual(['QR코드', '종료', '삭제']);
   });
 
-  it('종료된 카드에만 삭제가 나온다', () => {
+  it('종료된 카드에도 삭제가 나온다', () => {
     render(<SessionCard session={endedSession} onOpen={() => {}} onDelete={() => {}} />);
     expect(screen.getByText('삭제')).toBeTruthy();
+  });
+
+  it('onDelete 를 안 넘기면 삭제가 없다', () => {
+    render(<SessionCard session={activeSession} onOpen={() => {}} onQR={() => {}} onEnd={() => {}} />);
+    expect(screen.queryByText('삭제')).toBeNull();
   });
 
   it('종료된 카드에는 QR·종료 버튼이 없다 (상태 pill 의 「종료」와 혼동하지 않는다)', () => {

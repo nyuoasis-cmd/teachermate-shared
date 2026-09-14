@@ -93,10 +93,21 @@ export function QRButton({ sessionCode, sessionTitle, joinUrl, variant }: QRButt
           type="button"
           aria-label={ariaLabel}
           onClick={() => setIsFullscreenOpen(true)}
-          className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-stone-300 bg-white px-4 text-sm font-medium text-stone-700 transition hover:bg-stone-50"
+          className="inline-flex items-center justify-center gap-1.5 font-semibold transition-opacity hover:opacity-90"
+          // 🔑 §10-A 정본과 같은 값(D3·D9) — 목록 카드의 QR 과 상세 헤더의 QR 이 같은 버튼으로 읽혀야 한다.
+          //    🩸 구판 「QR 띄우기」 흰 테두리는 BUILDER-UX §4-A 가 정본을 가리키기 전의 모양이다.
+          style={{
+            height: '44px',
+            padding: '0 14px',
+            minWidth: '92px',
+            borderRadius: '13px',
+            background: 'var(--color-btn-primary)',
+            color: 'var(--color-surface)',
+            fontSize: '13px',
+          }}
         >
-          <QrCode className="h-5 w-5" />
-          <span>QR 띄우기</span>
+          <QrCode className="h-[15px] w-[15px]" aria-hidden="true" />
+          <span>QR코드</span>
         </button>
       )}
 
