@@ -156,7 +156,7 @@ export function SessionCard({
           ) : null}
         </div>
 
-        {/* 액션 순서 = QR → 종료 → 삭제(종료 카드에만). §10-A */}
+        {/* 액션 순서 = QR → 종료 → 삭제(항상). §10-A v2.2 */}
         <div className="ml-auto flex flex-shrink-0 items-center gap-2">
           {active && onQR ? (
             <button
@@ -200,8 +200,10 @@ export function SessionCard({
             </button>
           ) : null}
 
-          {/* 🚨 D5 — 진행 중 카드에는 삭제를 두지 않는다. onDelete 를 넘겨도 나오지 않는다. */}
-          {!active && onDelete ? (
+          {/* 🔑 §10-A v2.2(2026-09-14) — 삭제는 **진행 중·종료 공통**으로 보인다(구 D5 폐기).
+              「종료 → 삭제」 두 번을 거치지 않게 한다. 경고는 버튼이 아니라 앱의 확인 모달이 책임진다 —
+              🩸 앱 서버가 진행 중 삭제를 거절하면 «누르면 실패하는 버튼» 이 되므로 넘기기 전에 서버를 확인할 것. */}
+          {onDelete ? (
             <button
               type="button"
               onClick={(event) => {
