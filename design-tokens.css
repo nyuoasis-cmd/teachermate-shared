@@ -40,9 +40,9 @@
   --color-info: #0ea5e9;            /* sky-500 */
 
   /* ===== 색상 — B §9.B-2 신규 semantic (2026-04-30) ===== */
-  --color-accent-mint: #C9E0D4;       /* mint 카드 배경 (landing) */
-  --color-accent-mint-tag: #9BB8A8;   /* mint 카드 안 태그 */
-  --color-accent-mint-text: #2d4a3e;  /* mint 영역 위 텍스트 (foreground) — 한결 v1 PR-22 신설 */
+  --color-accent-mint: #DDF3EC;       /* mint 카드 배경 (landing) */
+  --color-accent-mint-tag: #7EC8B5;   /* mint 카드 안 태그 */
+  --color-accent-mint-text: #17644F;  /* mint 영역 위 텍스트 (foreground) — 한결 v1 PR-22 신설 */
   --color-paper: #F4F0EA;             /* landing 베이지 배경 */
   --color-surface-elevated: #ffffff;  /* PR-1 시각 QA 확정값 (workspace 강조 카드) */
   --color-focus-ring: #0ea5e9;        /* PR-1 시각 QA 확정값 (sky-500 채용) */
