@@ -9,8 +9,10 @@ const COPY: Record<ExitGuardAudience, { title: string; description: string }> = 
     description: '저장하지 않은 변경사항이 있습니다. 정말 나가시겠어요?',
   },
   student: {
-    title: '수업에서 나가시겠어요?',
-    description: '저장하지 않은 변경사항이 있습니다. 정말 나가시겠어요?',
+    // §9.H-18 v2.4 — 나가기 확인은 첫 화면에서 «늘» 뜬다. 저장 안 된 입력이 없을 때도 뜨므로 기본 문구가
+    // «저장 안 됨» 을 단정하지 않는다. 못 보낸 입력이 있으면 앱이 message 로 §9.H-17 데이터 영향 문구를 넘긴다.
+    title: '수업에서 나갈까요?',
+    description: '수업 입장 화면으로 돌아가요. 저장된 내용은 그대로 남아요.',
   },
 };
 

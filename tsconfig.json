@@ -19,6 +19,6 @@
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "types": ["react", "react-dom"]
   },
-  "include": ["lib/**/*", "components/**/*", "hooks/**/*", "index.ts"],
+  "include": ["lib/**/*", "components/**/*", "hooks/**/*", "index.ts", "back.ts"],
   "exclude": ["node_modules", "dist"]
 }

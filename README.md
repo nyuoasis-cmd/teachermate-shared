@@ -31,6 +31,9 @@ TeacherMate 7개 앱 공용 라이브러리 (React 19 + TypeScript).
 - `hooks/useUndoDelete.ts` — headless undo 삭제 훅 (race-safe)
 - `hooks/useGroupInput.ts` — 모둠 입력 헤드리스 훅
 - `hooks/usePolling.ts` — AbortSignal 지원 제네릭 폴링 훅
+- `hooks/useExitGuard.ts` — 뒤로가기 나가기 확인(DESIGN-POLICY §9.H-18). v2.4 부터 **첫 화면에서만** 켠다: `when: inSession && (stepIndex === 0 || isFirstInAppEntry())` — 그 밖의 단계는 뒤로가기가 한 칸 뒤로 간다
+- `@teachermate/shared/back` — 위 두 훅만 모은 입구(react 외 의존 0). lucide·pdf-lib 가 없는 앱은 여기서 가져온다
+- `hooks/useBackClosable.ts` — 창(QR·팝업·메뉴·하단 시트)이 열려 있으면 뒤로가기가 **창만 닫는다**. `useBackClosable(open, () => setOpen(false))`. 창 안에서 화면을 옮길 땐 반환값 `closeThen(() => navigate(to))`(창 칸을 치운 뒤 push — replace 는 깊이를 물려받아 «첫 화면» 으로 오판된다)
 
 ---
 

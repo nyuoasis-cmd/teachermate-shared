@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { isBackConsumed } from './useBackClosable';
 
 /**
  * useExitGuard — 브라우저/하드웨어 뒤로가기로 앱 밖 이탈을 막는 라우터-무관 표준 훅.
@@ -23,6 +24,8 @@ const SENTINEL_KEY = '__tmExitGuard';
 const RELEASE_FALLBACK_MS = 50;
 /** fallback이 cb를 실행한 뒤 late traversal popstate를 흡수하기 위해 listener를 유지하는 유예(ms). */
 const RELEASE_FALLBACK_GRACE_MS = 200;
+/** 창이 가져간 뒤로가기 뒤, sentinel 이 사라졌는지 판단하기까지 기다리는 시간(ms). 창 정리 back() 연쇄를 기다린다. */
+const REARM_AFTER_CONSUMED_MS = 80;
 
 /** window-global 키 — 번들/버전이 달라도 같은 window를 공유하면 소유권을 함께 본다(codex 버전-스큐 대응). */
 const REGISTRY_KEY = '__tmExitGuardOwners';
@@ -305,10 +308,32 @@ export function useExitGuard(opts: UseExitGuardOptions): UseExitGuardReturn {
   }, []);
 
   // 가드 표면(popstate/beforeunload) 핸들러 — 마운트 1회 등록, 이벤트 시점 ref로 게이팅.
-  const onPopState = useCallback(() => {
+  // 창 정리가 끝난 뒤 내 sentinel 이 사라졌으면 다시 깐다(codex 2026-09-28 재검토 high).
+  // 창이 가드보다 먼저 열려 sentinel 이 창 칸 위에 쌓였거나, 빈 창 칸을 치우느라 back 이 한 번 더 나가면
+  // 정리가 끝난 자리에 sentinel 이 없다 — 그대로 두면 다음 뒤로가기가 확인 없이 앱 밖으로 나간다.
+  // 🔑 바로 하지 않고 잠깐 기다린다: 창 정리는 back() 을 연달아 부를 수 있고(빈 칸), closeThen 은 곧 라우터 이동을
+  //    한다(그러면 when 이 false 가 되어 다시 깔 필요가 없다). 마지막 소비 popstate 뒤 한 번만 판단한다.
+  const rearmTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const scheduleRearm = useCallback(() => {
+    if (rearmTimerRef.current !== undefined) clearTimeout(rearmTimerRef.current);
+    rearmTimerRef.current = setTimeout(() => {
+      rearmTimerRef.current = undefined;
+      if (releasedRef.current || !mountedRef.current || !whenRef.current) return;
+      if (readSentinelMarker() === uidRef.current) return; // 이미 내 sentinel 위
+      armSentinel(); // 소유권-인지(다른 활성 가드의 칸이면 덮지 않는다)
+    }, REARM_AFTER_CONSUMED_MS);
+  }, [armSentinel]);
+
+  const onPopState = useCallback((event?: PopStateEvent) => {
+    // 창(useBackClosable)이 이 뒤로가기를 가져갔다 — 창만 닫히고 나가기 확인은 안 띄운다(§9.H-18 v2.4 표 첫 줄).
+    if (isBackConsumed(event)) { scheduleRearm(); return; }
     if (releasedRef.current) return; // release 후 추가 popstate no-op(SC-T9).
     if (!whenRef.current) return; // disarm 상태(when=false) — 통과시킴(SC-T6).
     if (!ownsSentinelRef.current) return; // passive(비소유) — 완전 no-op(SC-T14).
+    // 🔙 내 sentinel **위에** 섰다 = 더 위 칸(다음 단계·창)에서 첫 화면으로 한 칸 내려온 것이다. 나가려는 게 아니다.
+    //    나가기는 sentinel **아래** 칸으로 내려갔을 때뿐이다(§9.H-18 v2.4 「한 칸 뒤로」). 라우터가 popstate 를
+    //    동기로 그려 when 이 이미 true 로 바뀐 뒤에 여기 오므로, when 만으로는 둘을 못 가른다(2026-09-28 usertest 실측).
+    if (readSentinelMarker() === uidRef.current) return;
     // 소유 + 가드 활성 상태에서의 뒤로가기 → 모달 + sentinel 재push(정확히 1개)로 잔류.
     setPromptOpen(true);
     window.history.pushState(
@@ -316,7 +341,7 @@ export function useExitGuard(opts: UseExitGuardOptions): UseExitGuardReturn {
       '',
       window.location.href,
     );
-  }, []);
+  }, [scheduleRearm]);
 
   const onBeforeUnload = useCallback((event: BeforeUnloadEvent) => {
     if (releasedRef.current) return; // 동기 disarm — confirmed-exit cb가 location.assign해도 이중 프롬프트 0(SC-T8).
@@ -337,6 +362,7 @@ export function useExitGuard(opts: UseExitGuardOptions): UseExitGuardReturn {
       //    언마운트하는 정상 흐름에서도 late traversal 흡수·복원이 살아있어야 함. self-tear로 누수 방지.
       // 언마운트 cleanup(항목 6): listener/레지스트리만 정리. history.back() 절대 금지 → bounded stale 1개 수용.
       // (StrictMode 가짜 언마운트도 동일 — remount 시 arm()이 marker===uid를 보고 재push 없이 재소유.)
+      if (rearmTimerRef.current !== undefined) clearTimeout(rearmTimerRef.current);
       getRegistry().delete(uidRef.current);
       ownsSentinelRef.current = false;
       mountedRef.current = false; // 이후 cb 실패 복구가 죽은 인스턴스를 재arm하지 않도록(codex R5).
@@ -381,4 +407,20 @@ export function useExitGuard(opts: UseExitGuardOptions): UseExitGuardReturn {
   }, [when, armSentinel]);
 
   return { promptOpen, confirmExit, cancelExit, releaseAndNavigate };
+}
+
+/**
+ * 이 앱 안에서 쌓인 이전 화면이 없는가 — §9.H-18 v2.4 «첫 화면» 판정 보조.
+ * react-router(BrowserRouter·createBrowserRouter)는 history.state.idx 에 앱 안 깊이를 적는다(0 = 들어온 첫 칸).
+ * QR·링크·새로고침으로 곧바로 중간 단계에 들어와도 idx 는 0 이다 → 첫 화면으로 본다(기록을 지어내지 않는다).
+ * idx 가 없으면(다른 라우터·라우터 없음) 알 수 없으므로 첫 화면으로 본다 — 확인창이 한 번 더 뜨는 쪽이 앱 밖으로 떨어지는 쪽보다 낫다.
+ *
+ * 쓰는 법: `useExitGuard({ when: inSession && (stepIndex === 0 || isFirstInAppEntry()), onConfirmExit })`
+ *  → 첫 단계와 «곧바로 들어온 화면» 에서만 나가기 확인, 그 밖의 단계에서는 뒤로가기가 라우터대로 한 칸 뒤로 간다.
+ * 🔑 렌더 중에 불러도 된다(부작용 없음). 주소가 바뀔 때마다 다시 계산되도록 location 이 바뀌는 컴포넌트에서 부른다.
+ */
+export function isFirstInAppEntry(): boolean {
+  if (typeof window === 'undefined') return true;
+  const idx = (window.history.state as { idx?: unknown } | null | undefined)?.idx;
+  return typeof idx !== 'number' || idx <= 0;
 }

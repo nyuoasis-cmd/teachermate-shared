@@ -26,8 +26,13 @@ function Probe({
 
 /** 사용자 뒤로가기/traversal 완료를 시뮬레이션(jsdom은 실제 history.back 모킹 상태이므로 수동 dispatch). */
 function dispatchPopState() {
+  // 🔑 실제 브라우저의 뒤로가기는 sentinel **아래** 칸에 선다 — 그 칸에는 마커가 없다(2026-09-28 정정).
+  //    옛 흉내는 state 를 그대로 둔 채 발송해서 «sentinel 위에 섰다» 와 «아래로 내려갔다» 를 구분하지 못했다.
   act(() => {
-    window.dispatchEvent(new PopStateEvent('popstate', { state: window.history.state }));
+    const below = { ...(window.history.state ?? {}) } as Record<string, unknown>;
+    delete below[SENTINEL_KEY];
+    window.history.replaceState(below, '', window.location.href);
+    window.dispatchEvent(new PopStateEvent('popstate', { state: below }));
   });
 }
 
@@ -57,6 +62,21 @@ afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
   vi.useRealTimers();
+});
+
+describe('useExitGuard — §9.H-18 v2.4 한 칸 뒤로 (2026-09-28)', () => {
+  it('HB1: 다음 화면에서 뒤로가기로 sentinel 위에 서면(첫 화면으로 한 칸 내려옴) 확인창을 띄우지 않는다', () => {
+    render(<Probe when={true} />);
+    const sentinelState = window.history.state;
+    window.history.pushState({ idx: 1 }, '', window.location.href); // 다음 단계로 push
+    act(() => {
+      window.history.replaceState(sentinelState, '', window.location.href); // 뒤로가기 = sentinel 칸에 선다
+      window.dispatchEvent(new PopStateEvent('popstate', { state: sentinelState }));
+    });
+    expect(guards.a.promptOpen).toBe(false);
+    dispatchPopState(); // 그 아래로 = 진짜 나가려는 뒤로가기
+    expect(guards.a.promptOpen).toBe(true);
+  });
 });
 
 describe('useExitGuard — sentinel 생명주기 계약 (SC-T1~T24)', () => {
