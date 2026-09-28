@@ -55,6 +55,10 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
+    "./back": {
+      "types": "./dist/back.d.ts",
+      "import": "./dist/back.js"
+    },
     "./design-tokens.css": "./design-tokens.css"
   },
   "sideEffects": false
