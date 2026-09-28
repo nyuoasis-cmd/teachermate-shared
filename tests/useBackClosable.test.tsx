@@ -177,6 +177,24 @@ describe('useBackClosable — codex 2026-09-28 지적 3건', () => {
     expect(c1).not.toHaveBeenCalled();
   });
 
+  it('BC13: 가드와 창 두 개가 함께 열리고 아래 창부터 닫혀도 — 뒤로가기 1 = 위 창 닫힘 · 2 = 나가기 확인', () => {
+    vi.useFakeTimers();
+    const c1 = vi.fn(), c2 = vi.fn();
+    function Two({ o1 }: { o1: boolean }) {
+      guard = useExitGuard({ when: true, onConfirmExit: () => {} });
+      return <><Child open={o1} onClose={c1} /><Child open={true} onClose={c2} /></>;
+    }
+    const { rerender } = render(<Two o1={true} />); // 자식 창 두 칸 위에 가드 sentinel
+    rerender(<Two o1={false} />); // 아래 창만 닫음 → 빈 칸
+    traverseBack(); // 1
+    expect(c2).toHaveBeenCalledTimes(1);
+    expect(guard!.promptOpen).toBe(false);
+    act(() => { vi.advanceTimersByTime(200); }); // 창 정리 뒤 가드가 sentinel 을 다시 깐다
+    traverseBack(); // 2
+    expect(guard!.promptOpen).toBe(true);
+    vi.useRealTimers();
+  });
+
   it('BC12: 빈 칸 치우기의 popstate 는 가드가 무시한다(확인창이 튀지 않는다)', () => {
     const c1 = vi.fn(), c2 = vi.fn();
     const { rerender } = render(<Screen open={false} onClose={c1} guardOn={true} />);
