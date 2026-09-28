@@ -312,6 +312,10 @@ export function useExitGuard(opts: UseExitGuardOptions): UseExitGuardReturn {
     if (releasedRef.current) return; // release 후 추가 popstate no-op(SC-T9).
     if (!whenRef.current) return; // disarm 상태(when=false) — 통과시킴(SC-T6).
     if (!ownsSentinelRef.current) return; // passive(비소유) — 완전 no-op(SC-T14).
+    // 🔙 내 sentinel **위에** 섰다 = 더 위 칸(다음 단계·창)에서 첫 화면으로 한 칸 내려온 것이다. 나가려는 게 아니다.
+    //    나가기는 sentinel **아래** 칸으로 내려갔을 때뿐이다(§9.H-18 v2.4 「한 칸 뒤로」). 라우터가 popstate 를
+    //    동기로 그려 when 이 이미 true 로 바뀐 뒤에 여기 오므로, when 만으로는 둘을 못 가른다(2026-09-28 usertest 실측).
+    if (readSentinelMarker() === uidRef.current) return;
     // 소유 + 가드 활성 상태에서의 뒤로가기 → 모달 + sentinel 재push(정확히 1개)로 잔류.
     setPromptOpen(true);
     window.history.pushState(
