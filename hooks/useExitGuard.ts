@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { isBackConsumed } from './useBackClosable';
+import { isBackConsumed } from './useBackClosable.js';
 
 /**
  * useExitGuard — 브라우저/하드웨어 뒤로가기로 앱 밖 이탈을 막는 라우터-무관 표준 훅.
