@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { isBackConsumed } from './useBackClosable';
 
 /**
  * useExitGuard — 브라우저/하드웨어 뒤로가기로 앱 밖 이탈을 막는 라우터-무관 표준 훅.
@@ -305,7 +306,9 @@ export function useExitGuard(opts: UseExitGuardOptions): UseExitGuardReturn {
   }, []);
 
   // 가드 표면(popstate/beforeunload) 핸들러 — 마운트 1회 등록, 이벤트 시점 ref로 게이팅.
-  const onPopState = useCallback(() => {
+  const onPopState = useCallback((event?: PopStateEvent) => {
+    // 창(useBackClosable)이 이 뒤로가기를 가져갔다 — 창만 닫히고 나가기 확인은 안 띄운다(§9.H-18 v2.4 표 첫 줄).
+    if (isBackConsumed(event)) return;
     if (releasedRef.current) return; // release 후 추가 popstate no-op(SC-T9).
     if (!whenRef.current) return; // disarm 상태(when=false) — 통과시킴(SC-T6).
     if (!ownsSentinelRef.current) return; // passive(비소유) — 완전 no-op(SC-T14).
@@ -381,4 +384,20 @@ export function useExitGuard(opts: UseExitGuardOptions): UseExitGuardReturn {
   }, [when, armSentinel]);
 
   return { promptOpen, confirmExit, cancelExit, releaseAndNavigate };
+}
+
+/**
+ * 이 앱 안에서 쌓인 이전 화면이 없는가 — §9.H-18 v2.4 «첫 화면» 판정 보조.
+ * react-router(BrowserRouter·createBrowserRouter)는 history.state.idx 에 앱 안 깊이를 적는다(0 = 들어온 첫 칸).
+ * QR·링크·새로고침으로 곧바로 중간 단계에 들어와도 idx 는 0 이다 → 첫 화면으로 본다(기록을 지어내지 않는다).
+ * idx 가 없으면(다른 라우터·라우터 없음) 알 수 없으므로 첫 화면으로 본다 — 확인창이 한 번 더 뜨는 쪽이 앱 밖으로 떨어지는 쪽보다 낫다.
+ *
+ * 쓰는 법: `useExitGuard({ when: inSession && (stepIndex === 0 || isFirstInAppEntry()), onConfirmExit })`
+ *  → 첫 단계와 «곧바로 들어온 화면» 에서만 나가기 확인, 그 밖의 단계에서는 뒤로가기가 라우터대로 한 칸 뒤로 간다.
+ * 🔑 렌더 중에 불러도 된다(부작용 없음). 주소가 바뀔 때마다 다시 계산되도록 location 이 바뀌는 컴포넌트에서 부른다.
+ */
+export function isFirstInAppEntry(): boolean {
+  if (typeof window === 'undefined') return true;
+  const idx = (window.history.state as { idx?: unknown } | null | undefined)?.idx;
+  return typeof idx !== 'number' || idx <= 0;
 }
