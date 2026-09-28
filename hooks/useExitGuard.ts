@@ -72,6 +72,13 @@ export interface UseExitGuardOptions {
   onConfirmExit: ExitGuardCallback;
   /** 확인 모달 본문(옵션). */
   message?: string;
+  /**
+   * 탭 닫기·새로고침 경고(beforeunload)를 걸 조건. 생략하면 `when` 과 같다(옛 동작).
+   * 🔙 §9.H-18 v2.4 부터 가드는 **첫 화면에서 늘** 켜진다 — 그 `when` 을 그대로 쓰면 저장할 것이 없어도
+   *    새로고침할 때마다 브라우저 경고가 뜬다(2026-09-28 design-v3 화면 시험이 그 경고에 막혀 멈췄다).
+   *    그래서 v2.4 방식 앱은 «못 보낸 입력이 있는가» 를 여기에 따로 넘긴다(beforeunload 는 보조 — §9.H-18).
+   */
+  unloadWhen?: boolean;
 }
 
 export interface UseExitGuardReturn {
@@ -99,6 +106,7 @@ function readSentinelMarker(): unknown {
 
 export function useExitGuard(opts: UseExitGuardOptions): UseExitGuardReturn {
   const { when, onConfirmExit } = opts;
+  const unloadWhen = opts.unloadWhen ?? when;
 
   const uidRef = useRef<string>('');
   if (!uidRef.current) {
@@ -109,6 +117,7 @@ export function useExitGuard(opts: UseExitGuardOptions): UseExitGuardReturn {
 
   // 이벤트 시점에 읽는 최신값 ref들(렌더 후 동기화).
   const whenRef = useRef(when);
+  const unloadWhenRef = useRef(unloadWhen);
   const onConfirmExitRef = useRef(onConfirmExit);
   // sentinel을 내가 소유하는가(= popstate 차단/재push, back 보정의 게이트).
   const ownsSentinelRef = useRef(false);
@@ -120,6 +129,7 @@ export function useExitGuard(opts: UseExitGuardOptions): UseExitGuardReturn {
   useEffect(() => {
     onConfirmExitRef.current = onConfirmExit;
     whenRef.current = when;
+    unloadWhenRef.current = unloadWhen;
   });
 
   /**
@@ -346,7 +356,7 @@ export function useExitGuard(opts: UseExitGuardOptions): UseExitGuardReturn {
   const onBeforeUnload = useCallback((event: BeforeUnloadEvent) => {
     if (releasedRef.current) return; // 동기 disarm — confirmed-exit cb가 location.assign해도 이중 프롬프트 0(SC-T8).
     if (!ownsSentinelRef.current) return; // passive(비소유)는 beforeunload도 막지 않음 — owner가 담당(codex B, SC-T8b).
-    if (!whenRef.current) return;
+    if (!whenRef.current || !unloadWhenRef.current) return;
     event.preventDefault();
     event.returnValue = '';
   }, []);

@@ -79,6 +79,35 @@ describe('useExitGuard — §9.H-18 v2.4 한 칸 뒤로 (2026-09-28)', () => {
   });
 });
 
+describe('useExitGuard — unloadWhen (새로고침 경고는 못 보낸 입력이 있을 때만)', () => {
+  function UnloadProbe({ unloadWhen }: { unloadWhen?: boolean }) {
+    guards.a = useExitGuard({ when: true, onConfirmExit: () => {}, ...(unloadWhen === undefined ? {} : { unloadWhen }) });
+    return null;
+  }
+  const fire = () => {
+    const e = new Event('beforeunload', { cancelable: true }) as BeforeUnloadEvent;
+    window.dispatchEvent(e);
+    return e.defaultPrevented;
+  };
+  it('UW1: unloadWhen=false 면 첫 화면 가드가 켜져 있어도 새로고침 경고를 걸지 않는다', () => {
+    render(<UnloadProbe unloadWhen={false} />);
+    expect(fire()).toBe(false);
+  });
+  it('UW2: unloadWhen=true 면 건다', () => {
+    render(<UnloadProbe unloadWhen={true} />);
+    expect(fire()).toBe(true);
+  });
+  it('UW3: 생략하면 옛 동작(when 과 같음)', () => {
+    render(<UnloadProbe />);
+    expect(fire()).toBe(true);
+  });
+  it('UW4: unloadWhen 과 무관하게 뒤로가기 확인은 그대로 뜬다', () => {
+    render(<UnloadProbe unloadWhen={false} />);
+    dispatchPopState();
+    expect(guards.a.promptOpen).toBe(true);
+  });
+});
+
 describe('useExitGuard — sentinel 생명주기 계약 (SC-T1~T24)', () => {
   // SC-T1 (정상) 리렌더에도 sentinel push 1회만(idempotent).
   it('SC-T1: 3회 리렌더에도 sentinel은 1번만 push된다', () => {
