@@ -41,7 +41,7 @@ beforeEach(() => {
   w.__tmBackClosableStack = [];
   w.__tmBackClosablePending = 0;
   w.__tmBackClosableDeferred = [];
-  w.__tmBackClosableLate = 0;
+  w.__tmBackClosableFlushScheduled = false;
   const realPush = window.history.pushState.bind(window.history);
   vi.spyOn(window.history, 'pushState').mockImplementation((state, unused, url) => {
     entries.push(state);

@@ -41,7 +41,7 @@ beforeEach(() => {
   w.__tmBackClosableStack = [];
   w.__tmBackClosablePending = 0;
   w.__tmBackClosableDeferred = [];
-  w.__tmBackClosableLate = 0;
+  w.__tmBackClosableFlushScheduled = false;
   w.__tmExitGuardOwners = new Set();
   w.__tmExitGuardSeq = 0;
   const realPush = window.history.pushState.bind(window.history);
@@ -157,7 +157,11 @@ describe('QRFullscreen · QRButton', () => {
     expect(entries.length).toBe(2); // 작은 창 칸
     fireEvent.click(screen.getByText('수업 중 크게 띄우기'));
     expect(calls).toEqual(['push', 'back']); // 큰 창의 push 는 아직 — back 을 기다린다
-    traverseBack(); // 작은 창의 칸이 치워졌다 → 그제서야 큰 창이 칸을 쌓는다
+    traverseBack(); // 작은 창의 칸이 치워졌다 → 다음 틱에 큰 창이 칸을 쌓는다
+    expect(calls).toEqual(['push', 'back']); // popstate 를 나눠 주는 도중에는 쌓지 않는다(codex 2차 P1)
+    act(() => {
+      vi.advanceTimersByTime(0);
+    });
     expect(calls).toEqual(['push', 'back', 'push']);
     expect(entries.length).toBe(2);
     expect(screen.getByRole('dialog')).toBeTruthy(); // 큰 창은 닫히지 않았다
@@ -231,30 +235,38 @@ describe('useBackClosable — 기다림이 영영 막지 않는다', () => {
     const go = vi.fn(() => calls.push('go'));
     act(() => closer!.closeThen(go));
     expect(go).not.toHaveBeenCalled(); // A 의 back 이 아직 — 지금 이동하면 그 back 이 이동을 되돌린다
-    traverseBack();
+    traverseBack(); // A 의 back 도착
+    act(() => {
+      vi.advanceTimersByTime(0); // 줄 풀림 = B 가 칸을 쌓고 → 줄 선 closeThen 이 정식으로 B 칸을 치운다
+    });
+    expect(go).not.toHaveBeenCalled();
+    expect(calls).toEqual(['push', 'back', 'push', 'back']);
+    traverseBack(); // B 칸 치움
+    act(() => {
+      vi.advanceTimersByTime(0);
+    });
     expect(calls[calls.length - 1]).toBe('go');
+    expect(entries.length).toBe(1); // 죽은 칸 없음
   });
 
-  it('W13: 한도를 넘겨 늦게 온 back 은 그 사이 연 새 창을 닫지 않는다', () => {
-    const closedB = vi.fn();
-    function Swap2() {
-      const [a, setA] = useState(true);
-      const [b, setB] = useState(false);
-      useBackClosable(a, () => setA(false));
-      useBackClosable(b, () => { closedB(); setB(false); });
-      return <button onClick={() => { setA(false); setB(true); }}>swap</button>;
-    }
-    render(<Swap2 />);
-    fireEvent.click(screen.getByText('swap'));
+  it('W13: 기다림을 포기한 창은 퇴장한다 — 나중의 진짜 뒤로가기를 닫힌 창이 가져가지 않는다', () => {
+    const onClose = vi.fn();
+    const { rerender } = render(<ConfirmModal open onClose={onClose} onConfirm={() => {}} title="x" />);
+    rerender(<ConfirmModal open={false} onClose={onClose} onConfirm={() => {}} title="x" />); // 버튼으로 닫음 → back
     act(() => {
-      vi.advanceTimersByTime(300); // 기다림 포기 → B 가 칸을 쌓는다
+      vi.advanceTimersByTime(300); // popstate 가 안 왔다 → 퇴장
     });
-    expect(calls).toEqual(['push', 'back', 'push']);
-    // A 의 back 이 이제야 도착 — B 의 칸이 아니라 A 의 칸을 치운 결과로 보고 흡수한다
+    let consumed: boolean | null = null;
+    const probe = (e: Event) => {
+      consumed = Boolean((e as unknown as Record<string, unknown>).__tmBackConsumed);
+    };
+    window.addEventListener('popstate', probe);
     act(() => {
       window.dispatchEvent(new PopStateEvent('popstate', { state: {} }));
     });
-    expect(closedB).not.toHaveBeenCalled();
+    window.removeEventListener('popstate', probe);
+    expect(consumed).toBe(false); // 가드가 받을 수 있다
+    expect((window as unknown as Record<string, unknown[]>).__tmBackClosableStack.length).toBe(0);
   });
 
   it('W11: back 의 popstate 가 안 오는 기기 — 한도(300ms) 뒤에는 새 창이 칸을 쌓는다', () => {
@@ -262,7 +274,7 @@ describe('useBackClosable — 기다림이 영영 막지 않는다', () => {
     fireEvent.click(screen.getByText('swap'));
     expect(calls).toEqual(['push', 'back']);
     act(() => {
-      vi.advanceTimersByTime(300);
+      vi.advanceTimersByTime(301); // 300ms 포기 → 다음 틱에 줄이 풀린다
     });
     expect(calls).toEqual(['push', 'back', 'push']);
   });

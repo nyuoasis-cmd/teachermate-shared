@@ -26,10 +26,7 @@ const ENTRY_KEY = '__tmBackClosable';
 const CONSUMED_KEY = '__tmBackConsumed';
 const PENDING_KEY = '__tmBackClosablePending';
 const DEFERRED_KEY = '__tmBackClosableDeferred';
-const LATE_KEY = '__tmBackClosableLate';
-const LATE_LISTENER_KEY = '__tmBackClosableLateListener';
-/** 기다림을 포기한 back 이 늦게 도착할 수 있는 시간(ms). 이 안에 온 popstate 하나는 늦은 back 으로 흡수한다. */
-const LATE_BACK_WINDOW_MS = 2000;
+const FLUSH_SCHEDULED_KEY = '__tmBackClosableFlushScheduled';
 /** closeThen 이 back 의 popstate 를 기다리는 한도(ms). 넘으면 이동을 그냥 진행한다(이동이 멈추는 것보다 낫다). */
 const CLOSE_THEN_FALLBACK_MS = 300;
 
@@ -38,8 +35,7 @@ type ClosableGlobals = {
   [SEQ_KEY]?: number;
   [PENDING_KEY]?: number;
   [DEFERRED_KEY]?: Array<() => void>;
-  [LATE_KEY]?: number;
-  [LATE_LISTENER_KEY]?: boolean;
+  [FLUSH_SCHEDULED_KEY]?: boolean;
 };
 
 function stack(): string[] {
@@ -76,6 +72,12 @@ function pendingBacks(): number {
   return globals()[PENDING_KEY] ?? 0;
 }
 
+/** 새 창·이동이 줄을 서야 하는가 — 우리 back 이 오는 중이거나, 도착했지만 줄을 아직 안 풀었다. */
+function mustWait(): boolean {
+  const w = globals();
+  return pendingBacks() > 0 || Boolean(w[FLUSH_SCHEDULED_KEY]);
+}
+
 function deferred(): Array<() => void> {
   const w = globals();
   if (!w[DEFERRED_KEY]) w[DEFERRED_KEY] = [];
@@ -87,51 +89,24 @@ function beginOwnBack() {
   globals()[PENDING_KEY] = pendingBacks() + 1;
 }
 
-/** 우리가 부른 back 이 도착했다(또는 기다림을 포기했다) — 기다리던 새 창을 연다. */
+/**
+ * 우리가 부른 back 이 도착했다(또는 기다림을 포기했다) — 기다리던 새 창·이동을 **다음 틱에** 푼다.
+ * 🚨 지금은 그 popstate 를 나눠 주는 중일 수 있다. 여기서 바로 이동하면 가드의 releaseAndNavigate 가
+ * 같은 popstate 를 받아 버린다(codex 2차 P1).
+ */
 function endOwnBack() {
   const w = globals();
   w[PENDING_KEY] = Math.max(0, pendingBacks() - 1);
-  if (w[PENDING_KEY] === 0) {
-    const queue = deferred().splice(0);
-    for (const activate of queue) activate();
-  }
-}
-
-/*
- * 늦게 도착한 back — 300ms 를 기다리다 포기한 뒤에 우리가 부른 back 의 popstate 가 오면, 그건 사용자의 뒤로가기가
- * 아니다. 그 사이 새로 연 창이 그걸 자기 뒤로가기로 알고 닫히면 안 된다. 창마다 붙는 리스너보다 **먼저** 받도록
- * 첫 사용 때 창 전역에 capture 리스너 하나를 단다(등록 순서 = 호출 순서).
- */
-function ensureLateListener() {
-  const w = globals();
-  if (w[LATE_LISTENER_KEY]) return;
-  w[LATE_LISTENER_KEY] = true;
-  window.addEventListener(
-    'popstate',
-    (event) => {
-      const late = globals()[LATE_KEY] ?? 0;
-      if (late <= 0) return;
-      globals()[LATE_KEY] = late - 1;
-      markConsumed(event);
-      (event as unknown as Record<string, unknown>)[LATE_EVENT_MARK] = true;
-    },
-    true,
-  );
-}
-
-const LATE_EVENT_MARK = '__tmBackLate';
-
-function isLateBack(event: Event): boolean {
-  return Boolean((event as unknown as Record<string, unknown>)[LATE_EVENT_MARK]);
-}
-
-function expectLateBack() {
-  const w = globals();
-  w[LATE_KEY] = (w[LATE_KEY] ?? 0) + 1;
+  if (w[PENDING_KEY] !== 0 || w[FLUSH_SCHEDULED_KEY]) return;
+  w[FLUSH_SCHEDULED_KEY] = true;
   window.setTimeout(() => {
-    const g = globals();
-    g[LATE_KEY] = Math.max(0, (g[LATE_KEY] ?? 0) - 1); // 끝내 안 왔다 — 다음 사용자 뒤로가기를 먹지 않게 푼다
-  }, LATE_BACK_WINDOW_MS);
+    globals()[FLUSH_SCHEDULED_KEY] = false;
+    // 푸는 도중에 또 back 을 부르면(줄 선 closeThen) 나머지는 그 back 뒤로 다시 줄 선다.
+    while (deferred().length > 0 && !mustWait()) {
+      const next = deferred().shift() as () => void;
+      next();
+    }
+  }, 0);
 }
 
 function currentEntryId(): unknown {
@@ -151,6 +126,8 @@ type Instance = {
   awaitingZombieBack: boolean;
   /** beginOwnBack 을 부르고 아직 endOwnBack 을 안 불렀다 */
   ownBackPending: boolean;
+  /** 더는 아무것도 가져가지 않게 퇴장(리스너·스택에서 뺀다) */
+  retire?: () => void;
   onPop: (event: PopStateEvent) => void;
   ownBack?: () => void;
   settleOwnBack?: () => void;
@@ -185,13 +162,18 @@ export function useBackClosable(open: boolean, onClose: () => void): BackClosabl
     const settleOwnBack = (target: Instance, byTimeout = false) => {
       if (!target.ownBackPending) return;
       target.ownBackPending = false;
-      if (byTimeout) expectLateBack(); // 그 back 이 나중에 오면 아무 창도 닫지 않고 흡수한다
+      // 기다림을 포기했다 — 이 창은 퇴장한다. 남겨 두면 나중의 진짜 뒤로가기를 닫힌 창이 가져가
+      // 나가기 확인이 안 뜬다(codex 2차 P2). 늦게 온 back 은 흡수하지 않는다 — 진짜 뒤로가기와 구별할 수 없다.
+      if (!byTimeout) { endOwnBack(); return; }
+      const after = target.after; // closeThen 이 맡긴 이동은 잃지 않는다
+      target.after = null;
+      target.retire?.();
       endOwnBack();
+      if (after) window.setTimeout(after, 0);
     };
 
     const activate = () => {
       if (cancelled) return;
-      ensureLateListener();
       const id = nextId();
       stack().push(id);
       window.history.pushState({ ...window.history.state, [ENTRY_KEY]: id }, '', window.location.href);
@@ -211,7 +193,7 @@ export function useBackClosable(open: boolean, onClose: () => void): BackClosabl
         id, done: false, closingByUi: false, after: null, zombie: false, awaitingZombieBack: false,
         ownBackPending: false,
         onPop: (event: PopStateEvent) => {
-          if (me.done || isLateBack(event)) return;
+          if (me.done) return;
           if (me.zombie) {
             if (me.awaitingZombieBack) { markConsumed(event); finish(); settleOwnBack(me); return; }
             // 위 창이 닫혀 내 빈 칸에 섰다 — 한 칸 더 내려가 치운다.
@@ -234,6 +216,7 @@ export function useBackClosable(open: boolean, onClose: () => void): BackClosabl
           }
         },
       };
+      me.retire = finish;
       me.ownBack = () => ownBack(me);
       me.settleOwnBack = () => settleOwnBack(me, true);
       inst = me;
@@ -241,7 +224,7 @@ export function useBackClosable(open: boolean, onClose: () => void): BackClosabl
       window.addEventListener('popstate', me.onPop, true); // capture — useExitGuard(버블)보다 먼저 받는다
     };
 
-    if (pendingBacks() > 0) deferred().push(activate);
+    if (mustWait()) deferred().push(activate);
     else activate();
 
     return () => {
@@ -280,9 +263,10 @@ export function useBackClosable(open: boolean, onClose: () => void): BackClosabl
   const closeThen = useCallback((fn: () => void) => {
     if (typeof window === 'undefined') { fn(); return; }
     const inst = instRef.current;
-    if (!inst && pendingBacks() > 0) {
-      // 창이 아직 칸을 쌓기 전(앞 창의 back 을 기다리는 중) — 그 back 이 끝난 뒤에 이동한다(codex medium).
-      deferred().push(fn);
+    if (!inst && mustWait()) {
+      // 창이 아직 칸을 쌓기 전(앞 창의 back 을 기다리는 중) — 줄이 풀린 뒤(그때는 창이 칸을 쌓았다)
+      // closeThen 을 **다시** 부른다. 그냥 fn 을 부르면 방금 쌓인 창 칸이 죽은 칸으로 남는다(codex 2차 P1).
+      deferred().push(() => closeThenRef.current(fn));
       return;
     }
     if (!inst || inst.done || inst.zombie) { fn(); return; }
@@ -305,6 +289,9 @@ export function useBackClosable(open: boolean, onClose: () => void): BackClosabl
       after();
     }, CLOSE_THEN_FALLBACK_MS);
   }, []);
+
+  const closeThenRef = useRef(closeThen);
+  closeThenRef.current = closeThen;
 
   return { closeThen };
 }
