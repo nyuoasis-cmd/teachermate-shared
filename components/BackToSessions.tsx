@@ -61,6 +61,7 @@ export function BackToSessions({ audience }: BackToSessionsProps) {
         confirmLabel="나가기"
         cancelLabel="취소"
         variant="destructive"
+        confirmNavigates
       />
     </>
   );

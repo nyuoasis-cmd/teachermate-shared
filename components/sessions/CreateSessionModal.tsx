@@ -25,6 +25,11 @@ export interface CreateSessionModalProps {
   children?: React.ReactNode;
   /** 뒤로가기로 이 창만 닫기(기본 켬 · §9.H-18 v2.4) */
   closeOnBack?: boolean;
+  /**
+   * onCreate 가 새 수업 화면으로 이동한다 — 창 칸을 먼저 치운 뒤에 onCreate 를 부른다(closeThen).
+   * 안 켜면 이동한 화면에서 뒤로가기를 두 번 눌러야 한다. 기본은 예전처럼 누르는 즉시 onCreate.
+   */
+  createNavigates?: boolean;
 }
 
 export function CreateSessionModal({
@@ -35,19 +40,43 @@ export function CreateSessionModal({
   placeholder = '예: 3학년 2반 앱 만들기',
   children,
   closeOnBack = true,
+  createNavigates = false,
 }: CreateSessionModalProps) {
   const [title, setTitle] = useState('');
-  const win = useBackClosable(open && closeOnBack, onClose);
+  // 만들기를 누른 뒤 onCreate 가 끝날 때까지(칸 치우기를 기다리는 동안 포함) — 다시 누르기·닫기를 잠근다.
+  const [busy, setBusy] = useState(false);
+  const locked = creating || busy;
+  const lockedRef = useRef(locked);
+  lockedRef.current = locked;
+  // 뒤로가기가 칸을 가져갔는데 창은 안 닫혔다(만드는 중) — 끝나고도 열려 있으면 다시 건다.
+  const [disarmed, setDisarmed] = useState(false);
+  const win = useBackClosable(open && closeOnBack && !disarmed, () => {
+    if (lockedRef.current) setDisarmed(true);
+    else onClose();
+  });
+
+  useEffect(() => {
+    if (open && disarmed && !locked) setDisarmed(false);
+  }, [open, disarmed, locked]);
+
+  // 만들기를 누른 뒤에는 닫지 않는다 — 닫힌 창 뒤에서 onCreate 가 뒤늦게 도는 일이 없게(codex medium).
+  const busyRef = useRef(busy);
+  busyRef.current = busy;
+  const closeUnlessBusy = () => {
+    if (!busyRef.current) onClose();
+  };
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!open) {
       setTitle('');
+      setBusy(false);
+      setDisarmed(false);
       return;
     }
 
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
+      if (event.key === 'Escape') closeUnlessBusy();
     };
 
     const originalOverflow = document.body.style.overflow;
@@ -63,13 +92,30 @@ export function CreateSessionModal({
   if (!open) return null;
 
   const trimmed = title.trim();
-  const canSubmit = trimmed.length > 0 && !creating;
+  const canSubmit = trimmed.length > 0 && !locked;
+
+  const run = () => {
+    let result: void | Promise<void>;
+    try {
+      result = onCreate(trimmed);
+    } catch (error) {
+      setBusy(false);
+      throw error;
+    }
+    void Promise.resolve(result).finally(() => setBusy(false));
+  };
 
   const submit = () => {
     if (!canSubmit) return;
+    setBusy(true);
+    if (!createNavigates) {
+      run();
+      return;
+    }
     // 창 칸을 먼저 치운다 — onCreate 가 새 수업 화면으로 이동해도 뒤로가기를 두 번 누르는 칸이 남지 않는다.
     win.closeThen(() => {
-      void onCreate(trimmed);
+      setDisarmed(true);
+      run();
     });
   };
 
@@ -77,7 +123,7 @@ export function CreateSessionModal({
     <div
       className="fixed inset-0 z-[90] flex items-center justify-center p-4"
       style={{ background: 'rgba(28, 25, 23, 0.45)' }}
-      onClick={onClose}
+      onClick={closeUnlessBusy}
     >
       <FocusTrap>
         <div
@@ -107,7 +153,7 @@ export function CreateSessionModal({
             <button
               type="button"
               aria-label="닫기"
-              onClick={onClose}
+              onClick={closeUnlessBusy}
               className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full transition-colors"
               style={{ color: 'var(--color-text-muted)' }}
             >
@@ -143,7 +189,7 @@ export function CreateSessionModal({
           <div className="mt-6 flex justify-end gap-2">
             <button
               type="button"
-              onClick={onClose}
+              onClick={closeUnlessBusy}
               className="px-4 text-sm font-medium transition-colors"
               style={{
                 height: '44px',

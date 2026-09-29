@@ -41,6 +41,7 @@ beforeEach(() => {
   w.__tmBackClosableStack = [];
   w.__tmBackClosablePending = 0;
   w.__tmBackClosableDeferred = [];
+  w.__tmBackClosableLate = 0;
   w.__tmExitGuardOwners = new Set();
   w.__tmExitGuardSeq = 0;
   const realPush = window.history.pushState.bind(window.history);
@@ -69,22 +70,62 @@ describe('ConfirmModal — 뒤로가기 = 창만 닫힘', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it('W2: 처리 중(loading)에는 뒤로가기로 닫히지 않는다', () => {
+  it('W2: 처리 중(loading)에는 뒤로가기로 닫히지 않고, 처리가 끝나면 보호를 다시 건다', () => {
     const onClose = vi.fn();
-    render(<ConfirmModal open loading onClose={onClose} onConfirm={() => {}} title="삭제할까요?" />);
+    const { rerender } = render(<ConfirmModal open loading onClose={onClose} onConfirm={() => {}} title="삭제할까요?" />);
     traverseBack();
     expect(onClose).not.toHaveBeenCalled();
+    expect(calls).toEqual(['push']);
+    rerender(<ConfirmModal open loading={false} onClose={onClose} onConfirm={() => {}} title="삭제할까요?" />);
+    expect(calls).toEqual(['push', 'push']); // 다시 걸었다
+    traverseBack();
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it('W3: 확인 버튼 = 창 칸을 먼저 치운 뒤에 onConfirm (onConfirm 이 이동해도 죽은 칸 없음)', async () => {
+  it('W3: confirmNavigates = 창 칸을 먼저 치운 뒤(다음 틱)에 onConfirm — 이동해도 죽은 칸 없음 · 기다리는 동안 취소 잠김', () => {
     const onConfirm = vi.fn(() => {
       calls.push('confirm');
     });
-    render(<ConfirmModal open onClose={() => {}} onConfirm={onConfirm} title="나갈까요?" confirmLabel="나가기" />);
+    const onClose = vi.fn();
+    render(
+      <ConfirmModal open confirmNavigates onClose={onClose} onConfirm={onConfirm} title="나갈까요?" confirmLabel="나가기" />,
+    );
     fireEvent.click(screen.getByText('나가기'));
+    fireEvent.click(screen.getByText('취소')); // 기다리는 중 — 잠겨 있다
+    expect(onClose).not.toHaveBeenCalled();
     expect(onConfirm).not.toHaveBeenCalled(); // 아직 칸이 안 치워졌다
     traverseBack(); // 우리가 부른 back 의 popstate 도착
+    expect(onConfirm).not.toHaveBeenCalled(); // 그 popstate 를 나눠 주는 중에는 안 부른다
+    act(() => {
+      vi.advanceTimersByTime(0);
+    });
     expect(calls).toEqual(['push', 'back', 'confirm']);
+  });
+
+  it('W3b: 기본(confirmNavigates 없음)은 예전처럼 누르는 즉시 onConfirm — 기존 앱 호환', () => {
+    const onConfirm = vi.fn();
+    render(<ConfirmModal open onClose={() => {}} onConfirm={onConfirm} title="삭제할까요?" />);
+    fireEvent.click(screen.getByText('삭제'));
+    expect(onConfirm).toHaveBeenCalledTimes(1);
+    expect(calls).toEqual(['push']);
+  });
+
+  it('W3c: confirmNavigates 인데 확인 뒤에도 창이 남으면(앱이 안 닫음·실패) 뒤로가기 보호를 다시 건다', async () => {
+    const onConfirm = vi.fn(() => Promise.resolve());
+    const onClose = vi.fn(); // 앱이 open 을 안 내린다 — 창이 남는다
+    render(<ConfirmModal open confirmNavigates onClose={onClose} onConfirm={onConfirm} title="나갈까요?" confirmLabel="나가기" />);
+    fireEvent.click(screen.getByText('나가기'));
+    traverseBack();
+    await act(async () => {
+      vi.advanceTimersByTime(0);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(onConfirm).toHaveBeenCalledTimes(1);
+    expect(calls).toEqual(['push', 'back', 'push']); // 다시 걸었다
+    expect(onClose).toHaveBeenCalledTimes(1); // 확인 성공 때 한 번(앱이 무시)
+    traverseBack();
+    expect(onClose).toHaveBeenCalledTimes(2); // 이제 뒤로가기가 다시 창만 닫는다
   });
 
   it('W4: closeOnBack={false} 면 칸을 쌓지 않는다', () => {
@@ -140,16 +181,30 @@ describe('FocusTrap — 앱이 켤 때만', () => {
 });
 
 describe('CreateSessionModal', () => {
-  it('W10: 만들기 = 창 칸을 먼저 치운 뒤에 onCreate (새 수업 화면으로 이동해도 죽은 칸 없음)', () => {
+  it('W10: createNavigates = 창 칸을 먼저 치운 뒤에 onCreate (새 수업 화면으로 이동해도 죽은 칸 없음)', () => {
     const onCreate = vi.fn(() => {
       calls.push('create');
     });
+    const onClose = vi.fn();
+    render(<CreateSessionModal open createNavigates onClose={onClose} onCreate={onCreate} />);
+    fireEvent.change(screen.getByPlaceholderText('예: 3학년 2반 앱 만들기'), { target: { value: '1반' } });
+    fireEvent.click(screen.getByRole('button', { name: '만들기' }));
+    fireEvent.click(screen.getByRole('button', { name: '취소' })); // 기다리는 중 — 잠겨 있다
+    expect(onClose).not.toHaveBeenCalled();
+    expect(onCreate).not.toHaveBeenCalled();
+    traverseBack();
+    act(() => {
+      vi.advanceTimersByTime(0);
+    });
+    expect(calls).toEqual(['push', 'back', 'create']);
+  });
+
+  it('W10b: 기본은 예전처럼 누르는 즉시 onCreate — 기존 앱 호환', () => {
+    const onCreate = vi.fn();
     render(<CreateSessionModal open onClose={() => {}} onCreate={onCreate} />);
     fireEvent.change(screen.getByPlaceholderText('예: 3학년 2반 앱 만들기'), { target: { value: '1반' } });
     fireEvent.click(screen.getByRole('button', { name: '만들기' }));
-    expect(onCreate).not.toHaveBeenCalled();
-    traverseBack();
-    expect(calls).toEqual(['push', 'back', 'create']);
+    expect(onCreate).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -161,6 +216,46 @@ describe('useBackClosable — 기다림이 영영 막지 않는다', () => {
     useBackClosable(b, () => setB(false));
     return <button onClick={() => { setA(false); setB(true); }}>swap</button>;
   }
+
+  it('W12: 새 창이 칸을 쌓기 전에 부른 closeThen 은 앞 창의 back 이 끝난 뒤에 이동한다', () => {
+    let closer: ReturnType<typeof useBackClosable> | null = null;
+    function SwapGo() {
+      const [a, setA] = useState(true);
+      const [b, setB] = useState(false);
+      useBackClosable(a, () => setA(false));
+      closer = useBackClosable(b, () => setB(false));
+      return <button onClick={() => { setA(false); setB(true); }}>swap</button>;
+    }
+    render(<SwapGo />);
+    fireEvent.click(screen.getByText('swap'));
+    const go = vi.fn(() => calls.push('go'));
+    act(() => closer!.closeThen(go));
+    expect(go).not.toHaveBeenCalled(); // A 의 back 이 아직 — 지금 이동하면 그 back 이 이동을 되돌린다
+    traverseBack();
+    expect(calls[calls.length - 1]).toBe('go');
+  });
+
+  it('W13: 한도를 넘겨 늦게 온 back 은 그 사이 연 새 창을 닫지 않는다', () => {
+    const closedB = vi.fn();
+    function Swap2() {
+      const [a, setA] = useState(true);
+      const [b, setB] = useState(false);
+      useBackClosable(a, () => setA(false));
+      useBackClosable(b, () => { closedB(); setB(false); });
+      return <button onClick={() => { setA(false); setB(true); }}>swap</button>;
+    }
+    render(<Swap2 />);
+    fireEvent.click(screen.getByText('swap'));
+    act(() => {
+      vi.advanceTimersByTime(300); // 기다림 포기 → B 가 칸을 쌓는다
+    });
+    expect(calls).toEqual(['push', 'back', 'push']);
+    // A 의 back 이 이제야 도착 — B 의 칸이 아니라 A 의 칸을 치운 결과로 보고 흡수한다
+    act(() => {
+      window.dispatchEvent(new PopStateEvent('popstate', { state: {} }));
+    });
+    expect(closedB).not.toHaveBeenCalled();
+  });
 
   it('W11: back 의 popstate 가 안 오는 기기 — 한도(300ms) 뒤에는 새 창이 칸을 쌓는다', () => {
     render(<Swap />);
