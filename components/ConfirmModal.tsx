@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useBackClosable } from '../hooks/useBackClosable';
 
 /**
  * ConfirmModal — §9.H-4 single-primary-confirm modal 계약 구현체.
@@ -8,6 +9,8 @@ import { useEffect, useMemo, useState } from 'react';
  * - destructive variant: confirm 버튼 autoFocus 없음 → Enter 자동 발화 ❌ (정책 합규) ✓
  * - backdrop click: 닫기 (loading 중 잠금) ✓
  * - body scroll lock: open 동안 hidden ✓
+ * - 뒤로가기: 창만 닫힌다(§9.H-18 v2.4 · loading 중 잠금). 확인 버튼은 창 칸을 먼저 치운 **뒤에** onConfirm 을 부른다
+ *   → onConfirm 이 다른 화면으로 이동해도 뒤로가기를 두 번 누르는 칸이 남지 않는다.
  *
  * 외부 surface가 §9.H-3·9.H-8 destructive Enter 금지를 만족하려면 ConfirmModal을 사용하라.
  * 인라인 confirm 모달은 §9.H-4 destructive 계약 미흡 (ESC 누락 빈번).
@@ -22,6 +25,11 @@ export interface ConfirmModalProps {
   cancelLabel?: string;
   variant?: 'destructive' | 'primary';
   loading?: boolean;
+  /**
+   * 뒤로가기로 이 창만 닫기(기본 켬). 🚨 useExitGuard 의 나가기 확인창처럼 **뒤로가기가 연 창**은 끈다
+   * (ExitGuardModal 은 이미 끈다).
+   */
+  closeOnBack?: boolean;
 }
 
 export function ConfirmModal({
@@ -34,9 +42,15 @@ export function ConfirmModal({
   cancelLabel = '취소',
   variant = 'destructive',
   loading,
+  closeOnBack = true,
 }: ConfirmModalProps) {
   const [internalLoading, setInternalLoading] = useState(false);
   const isLoading = loading ?? internalLoading;
+  const isLoadingRef = useRef(isLoading);
+  isLoadingRef.current = isLoading;
+  const win = useBackClosable(open && closeOnBack, () => {
+    if (!isLoadingRef.current) onClose();
+  });
 
   useEffect(() => {
     if (!open) {
@@ -76,18 +90,24 @@ export function ConfirmModal({
     return null;
   }
 
-  const handleConfirm = async () => {
-    if (isLoading) {
-      return;
-    }
-
+  const runConfirm = async () => {
     try {
-      setInternalLoading(true);
       await onConfirm();
       onClose();
     } finally {
       setInternalLoading(false);
     }
+  };
+
+  const handleConfirm = () => {
+    if (isLoading) {
+      return;
+    }
+    setInternalLoading(true);
+    // 창 칸을 먼저 치운다 — onConfirm 이 navigate 해도 죽은 기록 칸이 남지 않는다(closeThen).
+    win.closeThen(() => {
+      void runConfirm();
+    });
   };
 
   return (

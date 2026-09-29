@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { X } from 'lucide-react';
 import { FocusTrap } from '../FocusTrap';
+import { useBackClosable } from '../../hooks/useBackClosable';
 
 /**
  * 수업 만들기 모달 — BUILDER-UX §4.
@@ -22,6 +23,8 @@ export interface CreateSessionModalProps {
   placeholder?: string;
   /** 앱 고유 입력칸(studio 수업 종류 등)을 이름칸 아래에 끼워 넣는다. */
   children?: React.ReactNode;
+  /** 뒤로가기로 이 창만 닫기(기본 켬 · §9.H-18 v2.4) */
+  closeOnBack?: boolean;
 }
 
 export function CreateSessionModal({
@@ -31,8 +34,10 @@ export function CreateSessionModal({
   creating = false,
   placeholder = '예: 3학년 2반 앱 만들기',
   children,
+  closeOnBack = true,
 }: CreateSessionModalProps) {
   const [title, setTitle] = useState('');
+  const win = useBackClosable(open && closeOnBack, onClose);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -62,7 +67,10 @@ export function CreateSessionModal({
 
   const submit = () => {
     if (!canSubmit) return;
-    void onCreate(trimmed);
+    // 창 칸을 먼저 치운다 — onCreate 가 새 수업 화면으로 이동해도 뒤로가기를 두 번 누르는 칸이 남지 않는다.
+    win.closeThen(() => {
+      void onCreate(trimmed);
+    });
   };
 
   return (

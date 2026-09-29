@@ -1,4 +1,5 @@
 import { useEffect, useRef, type ReactNode, type RefObject } from 'react';
+import { useBackClosable } from '../hooks/useBackClosable';
 
 export interface FocusTrapProps {
   children: ReactNode;
@@ -6,6 +7,11 @@ export interface FocusTrapProps {
   onEscape?: () => void;
   initialFocus?: 'first' | 'container' | RefObject<HTMLElement>;
   restoreFocus?: boolean;
+  /**
+   * 켜면 뒤로가기가 onEscape 를 부른다(창만 닫힘 · §9.H-18 v2.4). 기본 끔 —
+   * FocusTrap 은 창이 아닌 곳(항상 열린 패널)에도 쓰이므로 창 쪽에서 켠다.
+   */
+  closeOnBack?: boolean;
 }
 
 const FOCUSABLE_SELECTOR = [
@@ -23,7 +29,11 @@ export function FocusTrap({
   onEscape,
   initialFocus = 'first',
   restoreFocus = true,
+  closeOnBack = false,
 }: FocusTrapProps) {
+  const onEscapeRef = useRef(onEscape);
+  onEscapeRef.current = onEscape;
+  useBackClosable(Boolean(active && closeOnBack && onEscape), () => onEscapeRef.current?.());
   const containerRef = useRef<HTMLDivElement | null>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
 

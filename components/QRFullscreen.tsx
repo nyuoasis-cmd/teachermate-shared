@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { X } from 'lucide-react';
 import QRCode from 'qrcode';
+import { useBackClosable } from '../hooks/useBackClosable';
 
 export interface QRFullscreenProps {
   open: boolean;
@@ -9,6 +10,8 @@ export interface QRFullscreenProps {
   sessionTitle: string;
   joinUrl: string;
   participantCount?: number;
+  /** 뒤로가기로 이 창만 닫기(기본 켬 · §9.H-18 v2.4 표 첫 줄) */
+  closeOnBack?: boolean;
 }
 
 /**
@@ -48,7 +51,9 @@ export function QRFullscreen({
   sessionTitle,
   joinUrl,
   participantCount,
+  closeOnBack = true,
 }: QRFullscreenProps) {
+  useBackClosable(open && closeOnBack, onClose);
   const [qrSize, setQrSize] = useState(readQRSize);
   const [qrDataUrl, setQrDataUrl] = useState('');
 

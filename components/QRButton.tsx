@@ -3,6 +3,7 @@ import { Copy, ExternalLink, QrCode, X } from 'lucide-react';
 import QRCode from 'qrcode';
 import { showToast } from './ToastContainer';
 import { QRFullscreen } from './QRFullscreen';
+import { useBackClosable } from '../hooks/useBackClosable';
 
 export interface QRButtonProps {
   sessionCode: string;
@@ -15,6 +16,9 @@ export function QRButton({ sessionCode, sessionTitle, joinUrl, variant }: QRButt
   const [isCompactOpen, setIsCompactOpen] = useState(false);
   const [isFullscreenOpen, setIsFullscreenOpen] = useState(false);
   const [qrDataUrl, setQrDataUrl] = useState('');
+  // 작은 QR 창도 뒤로가기로 닫힌다. 「크게 띄우기」 는 작은 창을 닫는 같은 순간 큰 창을 연다 —
+  // 훅이 작은 창의 칸이 치워진 뒤에 큰 창의 칸을 쌓는다.
+  useBackClosable(isCompactOpen, () => setIsCompactOpen(false));
 
   const compactQrSize = 280;
   const ariaLabel = useMemo(() => `QR코드 보기 - ${sessionTitle}`, [sessionTitle]);
