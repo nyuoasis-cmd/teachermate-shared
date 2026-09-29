@@ -50,6 +50,8 @@ export function ExitGuardModal({
       confirmLabel="나가기"
       cancelLabel="취소"
       variant="destructive"
+      // 🚨 이 창은 뒤로가기가 연 창이다 — 여기서 뒤로가기를 또 가져가면 나가기가 영영 안 된다.
+      closeOnBack={false}
     />
   );
 }

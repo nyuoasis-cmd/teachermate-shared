@@ -39,6 +39,9 @@ beforeEach(() => {
   w.__tmExitGuardOwners = new Set();
   w.__tmExitGuardSeq = 0;
   w.__tmBackClosableStack = [];
+  w.__tmBackClosablePending = 0;
+  w.__tmBackClosableDeferred = [];
+  w.__tmBackClosableFlushScheduled = false;
   const realPush = window.history.pushState.bind(window.history);
   vi.spyOn(window.history, 'pushState').mockImplementation((state, unused, url) => {
     entries.push(state);
@@ -143,12 +146,16 @@ describe('useBackClosable — codex 2026-09-28 지적 3건', () => {
   it('BC9: closeThen — 창 칸을 치운 «뒤에» 이동한다(replace 로 깊이를 물려받지 않게)', () => {
     const onClose = vi.fn();
     const go = vi.fn();
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     render(<Screen open={true} onClose={onClose} />);
     act(() => closer!.closeThen(go));
     expect(backSpy).toHaveBeenCalledTimes(1);
     expect(go).not.toHaveBeenCalled(); // popstate 전에는 이동하지 않는다
     traverseBack();
+    expect(go).not.toHaveBeenCalled(); // 그 popstate 를 나눠 주는 중에는 이동하지 않는다(다음 틱)
+    act(() => { vi.advanceTimersByTime(0); });
     expect(go).toHaveBeenCalledTimes(1);
+    vi.useRealTimers();
     expect(onClose).not.toHaveBeenCalled();
     expect(window.history.state?.__tmBackClosable).toBeUndefined(); // 창 칸 위가 아니다 → push 는 페이지 위에 쌓인다
   });

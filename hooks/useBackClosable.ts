@@ -24,10 +24,19 @@ const STACK_KEY = '__tmBackClosableStack';
 const SEQ_KEY = '__tmBackClosableSeq';
 const ENTRY_KEY = '__tmBackClosable';
 const CONSUMED_KEY = '__tmBackConsumed';
+const PENDING_KEY = '__tmBackClosablePending';
+const DEFERRED_KEY = '__tmBackClosableDeferred';
+const FLUSH_SCHEDULED_KEY = '__tmBackClosableFlushScheduled';
 /** closeThen 이 back 의 popstate 를 기다리는 한도(ms). 넘으면 이동을 그냥 진행한다(이동이 멈추는 것보다 낫다). */
 const CLOSE_THEN_FALLBACK_MS = 300;
 
-type ClosableGlobals = { [STACK_KEY]?: string[]; [SEQ_KEY]?: number };
+type ClosableGlobals = {
+  [STACK_KEY]?: string[];
+  [SEQ_KEY]?: number;
+  [PENDING_KEY]?: number;
+  [DEFERRED_KEY]?: Array<() => void>;
+  [FLUSH_SCHEDULED_KEY]?: boolean;
+};
 
 function stack(): string[] {
   const w = window as unknown as ClosableGlobals;
@@ -50,6 +59,56 @@ function markConsumed(event: Event) {
   (event as unknown as Record<string, unknown>)[CONSUMED_KEY] = true;
 }
 
+/*
+ * 🔑 창 바꿔 끼우기(창 A 를 닫는 같은 순간 창 B 를 연다 — 예: 작은 QR → 「크게 띄우기」).
+ * A 의 칸을 치우는 history.back() 은 비동기라, 그 사이 B 가 pushState 하면 back 이 **B 의 칸**을 치우고
+ * B 가 곧바로 닫힌다. 그래서 우리가 부른 back 이 도착하기 전에는 새 창의 칸을 쌓지 않고 기다린다.
+ */
+function globals(): ClosableGlobals {
+  return window as unknown as ClosableGlobals;
+}
+
+function pendingBacks(): number {
+  return globals()[PENDING_KEY] ?? 0;
+}
+
+/** 새 창·이동이 줄을 서야 하는가 — 우리 back 이 오는 중이거나, 도착했지만 줄을 아직 안 풀었다. */
+function mustWait(): boolean {
+  const w = globals();
+  return pendingBacks() > 0 || Boolean(w[FLUSH_SCHEDULED_KEY]);
+}
+
+function deferred(): Array<() => void> {
+  const w = globals();
+  if (!w[DEFERRED_KEY]) w[DEFERRED_KEY] = [];
+  return w[DEFERRED_KEY] as Array<() => void>;
+}
+
+/** 우리가 back() 을 부른다 — 그 popstate 가 올 때까지 새 창은 칸을 쌓지 않는다. */
+function beginOwnBack() {
+  globals()[PENDING_KEY] = pendingBacks() + 1;
+}
+
+/**
+ * 우리가 부른 back 이 도착했다(또는 기다림을 포기했다) — 기다리던 새 창·이동을 **다음 틱에** 푼다.
+ * 🚨 지금은 그 popstate 를 나눠 주는 중일 수 있다. 여기서 바로 이동하면 가드의 releaseAndNavigate 가
+ * 같은 popstate 를 받아 버린다(codex 2차 P1).
+ */
+function endOwnBack() {
+  const w = globals();
+  w[PENDING_KEY] = Math.max(0, pendingBacks() - 1);
+  if (w[PENDING_KEY] !== 0 || w[FLUSH_SCHEDULED_KEY]) return;
+  w[FLUSH_SCHEDULED_KEY] = true;
+  window.setTimeout(() => {
+    globals()[FLUSH_SCHEDULED_KEY] = false;
+    // 푸는 도중에 또 back 을 부르면(줄 선 closeThen) 나머지는 그 back 뒤로 다시 줄 선다.
+    while (deferred().length > 0 && !mustWait()) {
+      const next = deferred().shift() as () => void;
+      next();
+    }
+  }, 0);
+}
+
 function currentEntryId(): unknown {
   return (window.history.state as Record<string, unknown> | null | undefined)?.[ENTRY_KEY];
 }
@@ -65,7 +124,13 @@ type Instance = {
   /** 위 창보다 먼저 닫혀 칸만 남은 창 */
   zombie: boolean;
   awaitingZombieBack: boolean;
+  /** beginOwnBack 을 부르고 아직 endOwnBack 을 안 불렀다 */
+  ownBackPending: boolean;
+  /** 더는 아무것도 가져가지 않게 퇴장(리스너·스택에서 뺀다) */
+  retire?: () => void;
   onPop: (event: PopStateEvent) => void;
+  ownBack?: () => void;
+  settleOwnBack?: () => void;
 };
 
 export interface BackClosable {
@@ -82,78 +147,134 @@ export function useBackClosable(open: boolean, onClose: () => void): BackClosabl
 
   useEffect(() => {
     if (!open || typeof window === 'undefined') return;
-    const id = nextId();
-    stack().push(id);
-    window.history.pushState({ ...window.history.state, [ENTRY_KEY]: id }, '', window.location.href);
+    let inst: Instance | null = null;
+    let cancelled = false;
 
-    const leaveStack = () => {
-      const s = stack();
-      const i = s.lastIndexOf(id);
-      if (i >= 0) s.splice(i, 1);
+    const ownBack = (target: Instance) => {
+      if (!target.ownBackPending) {
+        target.ownBackPending = true;
+        beginOwnBack();
+        // popstate 가 안 오는 기기 — 새 창을 영영 막지 않는다(settle 은 두 번 불려도 한 번만 푼다).
+        window.setTimeout(() => settleOwnBack(target, true), CLOSE_THEN_FALLBACK_MS);
+      }
+      window.history.back();
     };
-    const finish = () => {
-      inst.done = true;
-      leaveStack();
-      window.removeEventListener('popstate', inst.onPop, true);
+    const settleOwnBack = (target: Instance, byTimeout = false) => {
+      if (!target.ownBackPending) return;
+      target.ownBackPending = false;
+      // 기다림을 포기했다 — 이 창은 퇴장한다. 남겨 두면 나중의 진짜 뒤로가기를 닫힌 창이 가져가
+      // 나가기 확인이 안 뜬다(codex 2차 P2). 늦게 온 back 은 흡수하지 않는다 — 진짜 뒤로가기와 구별할 수 없다.
+      if (!byTimeout) { endOwnBack(); return; }
+      const after = target.after; // closeThen 이 맡긴 이동은 잃지 않는다
+      target.after = null;
+      target.retire?.();
+      endOwnBack();
+      if (after) window.setTimeout(after, 0);
     };
 
-    const inst: Instance = {
-      id, done: false, closingByUi: false, after: null, zombie: false, awaitingZombieBack: false,
-      onPop: (event: PopStateEvent) => {
-        if (inst.done) return;
-        if (inst.zombie) {
-          if (inst.awaitingZombieBack) { markConsumed(event); finish(); return; }
-          // 위 창이 닫혀 내 빈 칸에 섰다 — 한 칸 더 내려가 치운다.
-          if (currentEntryId() === id) { markConsumed(event); inst.awaitingZombieBack = true; window.history.back(); }
-          return;
-        }
+    const activate = () => {
+      if (cancelled) return;
+      const id = nextId();
+      stack().push(id);
+      window.history.pushState({ ...window.history.state, [ENTRY_KEY]: id }, '', window.location.href);
+
+      const leaveStack = () => {
         const s = stack();
-        if (s[s.length - 1] !== id) return; // 맨 위 창만 뒤로가기를 가져간다
-        markConsumed(event);
-        finish();
-        if (inst.after) {
-          const fn = inst.after;
-          inst.after = null;
-          fn();
-        } else if (!inst.closingByUi) {
-          onCloseRef.current();
-        }
-      },
+        const i = s.lastIndexOf(id);
+        if (i >= 0) s.splice(i, 1);
+      };
+      const finish = () => {
+        me.done = true;
+        leaveStack();
+        window.removeEventListener('popstate', me.onPop, true);
+      };
+
+      const me: Instance = {
+        id, done: false, closingByUi: false, after: null, zombie: false, awaitingZombieBack: false,
+        ownBackPending: false,
+        onPop: (event: PopStateEvent) => {
+          if (me.done) return;
+          if (me.zombie) {
+            if (me.awaitingZombieBack) { markConsumed(event); finish(); settleOwnBack(me); return; }
+            // 위 창이 닫혀 내 빈 칸에 섰다 — 한 칸 더 내려가 치운다.
+            if (currentEntryId() === id) { markConsumed(event); me.awaitingZombieBack = true; ownBack(me); }
+            return;
+          }
+          const s = stack();
+          if (s[s.length - 1] !== id) return; // 맨 위 창만 뒤로가기를 가져간다
+          markConsumed(event);
+          finish();
+          settleOwnBack(me); // 기다리던 새 창은 이 칸이 치워진 **뒤에** 쌓인다
+          if (me.after) {
+            const fn = me.after;
+            me.after = null;
+            // 🚨 다음 틱에 — 이 popstate 를 아직 나눠 주는 중이다. fn 이 가드의 releaseAndNavigate 처럼 popstate
+            // 리스너를 새로 달면, 버블 단계에서 **이 popstate** 를 받아 제 back 이 오기도 전에 이동해 버린다(codex high).
+            window.setTimeout(fn, 0);
+          } else if (!me.closingByUi) {
+            onCloseRef.current();
+          }
+        },
+      };
+      me.retire = finish;
+      me.ownBack = () => ownBack(me);
+      me.settleOwnBack = () => settleOwnBack(me, true);
+      inst = me;
+      instRef.current = me;
+      window.addEventListener('popstate', me.onPop, true); // capture — useExitGuard(버블)보다 먼저 받는다
     };
-    instRef.current = inst;
-    window.addEventListener('popstate', inst.onPop, true); // capture — useExitGuard(버블)보다 먼저 받는다
+
+    if (mustWait()) deferred().push(activate);
+    else activate();
 
     return () => {
-      if (instRef.current === inst) instRef.current = null;
-      if (inst.done || inst.closingByUi) return; // 이미 닫혔거나 closeThen 이 진행 중
+      cancelled = true;
+      const q = deferred();
+      const qi = q.indexOf(activate);
+      if (qi >= 0) q.splice(qi, 1); // 칸을 쌓기도 전에 닫혔다 — 치울 칸이 없다
+      const me = inst;
+      if (!me) return;
+      if (instRef.current === me) instRef.current = null;
+      if (me.done || me.closingByUi) return; // 이미 닫혔거나 closeThen 이 진행 중
       const s = stack();
-      const isTop = s[s.length - 1] === id;
-      if (isTop && currentEntryId() === id) {
+      const isTop = s[s.length - 1] === me.id;
+      if (isTop && currentEntryId() === me.id) {
         // 버튼으로 닫힘(또는 창을 연 채 언마운트) — 쌓아 둔 한 칸을 치우고, 그 popstate 는 onPop 이 소비한다.
         // (가드 sentinel 이 내 칸을 복사해 위에 섰어도 같은 id 라 여기로 온다 — back 이 그 칸을 치운다.)
-        inst.closingByUi = true;
-        window.history.back();
+        me.closingByUi = true;
+        ownBack(me);
         return;
       }
-      if (!isTop && s.includes(id)) {
+      if (!isTop && s.includes(me.id)) {
         // 위에 다른 창이 열려 있다 — 내 칸은 그 아래 빈 칸으로 남는다. 위 창이 닫히면 치운다.
-        leaveStack();
-        inst.zombie = true;
+        const i = s.lastIndexOf(me.id);
+        if (i >= 0) s.splice(i, 1);
+        me.zombie = true;
         return;
       }
       // 내 칸이 이미 다른 칸으로 바뀌었다(라우터 이동) — 치울 칸이 없다.
-      finish();
+      me.done = true;
+      const i = s.lastIndexOf(me.id);
+      if (i >= 0) s.splice(i, 1);
+      window.removeEventListener('popstate', me.onPop, true);
     };
   }, [open]);
 
   const closeThen = useCallback((fn: () => void) => {
+    if (typeof window === 'undefined') { fn(); return; }
     const inst = instRef.current;
-    if (!inst || inst.done || inst.zombie || typeof window === 'undefined') { fn(); return; }
+    if (!inst && mustWait()) {
+      // 창이 아직 칸을 쌓기 전(앞 창의 back 을 기다리는 중) — 줄이 풀린 뒤(그때는 창이 칸을 쌓았다)
+      // closeThen 을 **다시** 부른다. 그냥 fn 을 부르면 방금 쌓인 창 칸이 죽은 칸으로 남는다(codex 2차 P1).
+      deferred().push(() => closeThenRef.current(fn));
+      return;
+    }
+    if (!inst || inst.done || inst.zombie) { fn(); return; }
     const s = stack();
     if (s[s.length - 1] !== inst.id || currentEntryId() !== inst.id) { fn(); return; }
     inst.closingByUi = true;
     inst.after = fn;
-    window.history.back();
+    inst.ownBack?.();
     window.setTimeout(() => {
       if (inst.done || !inst.after) return;
       // back 의 popstate 가 안 왔다(아주 느린 기기) — 이동을 멈추지 않는다.
@@ -164,9 +285,13 @@ export function useBackClosable(open: boolean, onClose: () => void): BackClosabl
       const i = st.lastIndexOf(inst.id);
       if (i >= 0) st.splice(i, 1);
       window.removeEventListener('popstate', inst.onPop, true);
+      inst.settleOwnBack?.();
       after();
     }, CLOSE_THEN_FALLBACK_MS);
   }, []);
+
+  const closeThenRef = useRef(closeThen);
+  closeThenRef.current = closeThen;
 
   return { closeThen };
 }
