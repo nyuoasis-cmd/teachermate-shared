@@ -7,6 +7,15 @@ import { useExitGuard, isFirstInAppEntry, type UseExitGuardReturn } from '../hoo
 
 // jsdom 은 history.back() 으로 실제 traversal 을 하지 않는다 → back 을 막고, «한 칸 아래 state 로 내려가기» 를
 // 손으로 재현한다(replaceState 로 아래 칸 state 를 되살린 뒤 popstate 발송). 쌓인 state 는 push 스파이가 기록한다.
+/**
+ * 🔑 칸 이동(뒤로가기 traversal) 흉내 — 가드가 감싼 replaceState 가 아니라 원래 것을 쓴다.
+ * 감싼 replaceState 는 «같은 칸 덮어쓰기» 에서 sentinel 표식을 옮겨 적는다(2026-10-01). 칸 이동은 replace 가 아니므로
+ * 표식이 따라오면 안 된다 — jsdom 에는 진짜 traversal 이 없어 state 를 바꿔 끼우는 것으로 흉내 낸다.
+ */
+function travel(data: unknown, unused: string, url?: string) {
+  History.prototype.replaceState.call(window.history, data, unused, url);
+}
+
 let entries: unknown[];
 let backSpy: ReturnType<typeof vi.spyOn>;
 let guard: UseExitGuardReturn | null;
@@ -16,7 +25,7 @@ function traverseBack() {
   entries.pop();
   const below = entries[entries.length - 1] ?? {};
   act(() => {
-    window.history.replaceState(below, '', window.location.href);
+    travel(below, '', window.location.href);
     window.dispatchEvent(new PopStateEvent('popstate', { state: below }));
   });
 }
@@ -33,7 +42,7 @@ function Screen({ open, onClose, guardOn = false, open2 = false, onClose2 }: {
 beforeEach(() => {
   guard = null;
   closer = null;
-  window.history.replaceState({ idx: 0 }, '', window.location.href);
+  travel({ idx: 0 }, '', window.location.href);
   entries = [window.history.state];
   const w = window as unknown as Record<string, unknown>;
   w.__tmExitGuardOwners = new Set();

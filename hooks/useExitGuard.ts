@@ -48,6 +48,45 @@ function getRegistry(): Set<string> {
   return w[REGISTRY_KEY] as Set<string>;
 }
 
+/**
+ * 🔑 같은 칸을 덮어쓰는 replace 는 sentinel 표식을 지우지 못한다(2026-10-01 brand 퍼스널컬러 실측).
+ * 라우터의 replace(react-router `navigate(to, { replace: true })` 등)는 history.state 를 통째로 새로 쓴다.
+ * 가드가 첫 칸에 sentinel 을 깐 직후 앱이 주소를 replace 로 적으면(`?at=method`) 표식이 사라지고, 가드는
+ * 위 칸에서 그 칸으로 내려오는 뒤로가기를 «내 sentinel 아래로 나간다» 와 못 가른다 → 타이밍에 따라 한 칸 일찍
+ * 나가기 확인창이 떴다. replace 는 칸을 바꾸지 않으므로 그 칸은 여전히 sentinel 이다 — 표식을 옮겨 적는다.
+ * - 옮기는 조건: 지금 칸의 표식이 **살아 있는 가드**(레지스트리) 것이고, 새 state 가 표식 키를 **아예 언급하지 않을 때**.
+ *   표식을 일부러 바꾸거나 지우려는 쪽은 키를 적는다(`{ [SENTINEL_KEY]: undefined }` 도 «언급» 이다) → 손대지 않는다.
+ * - 새 칸을 만드는 pushState 는 건드리지 않는다. 기록 길이도 바꾸지 않는다(다시 push 하는 재무장과 다른 점).
+ * - window 당 한 번만 감싼다. 번들·버전이 달라도 같은 플래그를 본다.
+ */
+const REPLACE_CARRY_KEY = '__tmExitGuardReplaceCarry';
+
+function isPlainStateObject(value: unknown): value is Record<string, unknown> {
+  if (typeof value !== 'object' || value === null) return false;
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+
+function installReplaceCarry(): void {
+  if (typeof window === 'undefined') return;
+  const history = window.history as History & { [REPLACE_CARRY_KEY]?: true };
+  if (history[REPLACE_CARRY_KEY]) return;
+  const original = history.replaceState;
+  const replaceState = function replaceState(this: History, data: unknown, unused: string, url?: string | URL | null) {
+    const marker = (window.history.state as Record<string, unknown> | null | undefined)?.[SENTINEL_KEY];
+    if (typeof marker === 'string' && getRegistry().has(marker)) {
+      if (data === null || data === undefined) {
+        data = { [SENTINEL_KEY]: marker };
+      } else if (isPlainStateObject(data) && !(SENTINEL_KEY in data)) {
+        data = { ...data, [SENTINEL_KEY]: marker };
+      }
+    }
+    return original.call(this, data, unused, url);
+  };
+  Object.defineProperty(history, 'replaceState', { value: replaceState, configurable: true, writable: true });
+  history[REPLACE_CARRY_KEY] = true;
+}
+
 function nextExitGuardUid(): string {
   if (typeof window === 'undefined') {
     fallbackSeq += 1;
@@ -138,6 +177,7 @@ export function useExitGuard(opts: UseExitGuardOptions): UseExitGuardReturn {
    *    — restoreOnFailure(실패 복구) 경로가 passive 인스턴스의 async reject 후 외부 owner를 가로채는 계약위반 방지(codex R11 finding1).
    */
   const armSentinel = useCallback(() => {
+    installReplaceCarry();
     const registry = getRegistry();
     const marker = readSentinelMarker();
     if (marker === uidRef.current) {
@@ -384,6 +424,7 @@ export function useExitGuard(opts: UseExitGuardOptions): UseExitGuardReturn {
     whenRef.current = when;
     if (releasedRef.current) return; // release 후엔 언마운트까지 재arm 안 함(1회성).
     if (!when) return; // 일반 disarm: 핸들러가 whenRef로 no-op. history.back() 금지(항목 5).
+    installReplaceCarry(); // 재소유 경로(push 없음)에서도 replace 가 표식을 지우지 못하게.
 
     // idempotent skip은 "실제로 내 sentinel이 현재 entry에 살아있을 때"만(SC-T1). 소유권 플래그만 믿지 않는다 —
     // disarm 중 Back으로 sentinel이 소비되면 owns=true인데 마커가 사라질 수 있어, 그땐 재arm으로 재조정해야 함(codex R8).
