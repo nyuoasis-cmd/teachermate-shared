@@ -20,6 +20,15 @@ vi.mock('qrcode', () => ({
  * jsdom 은 history.back() 으로 실제 traversal 을 하지 않는다 → back 은 막고(호출 순서만 기록),
  * 「한 칸 아래로 내려가기」 는 traverseBack() 으로 손으로 재현한다(useBackClosable.test 와 같은 방식).
  */
+/**
+ * 🔑 칸 이동(뒤로가기 traversal) 흉내 — 가드가 감싼 replaceState 가 아니라 원래 것을 쓴다.
+ * 감싼 replaceState 는 «같은 칸 덮어쓰기» 에서 sentinel 표식을 옮겨 적는다(2026-10-01). 칸 이동은 replace 가 아니므로
+ * 표식이 따라오면 안 된다 — jsdom 에는 진짜 traversal 이 없어 state 를 바꿔 끼우는 것으로 흉내 낸다.
+ */
+function travel(data: unknown, unused: string, url?: string) {
+  History.prototype.replaceState.call(window.history, data, unused, url);
+}
+
 let entries: unknown[];
 let calls: string[];
 
@@ -27,14 +36,14 @@ function traverseBack() {
   entries.pop();
   const below = entries[entries.length - 1] ?? {};
   act(() => {
-    window.history.replaceState(below, '', window.location.href);
+    travel(below, '', window.location.href);
     window.dispatchEvent(new PopStateEvent('popstate', { state: below }));
   });
 }
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
-  window.history.replaceState({ idx: 0 }, '', window.location.href);
+  travel({ idx: 0 }, '', window.location.href);
   entries = [window.history.state];
   calls = [];
   const w = window as unknown as Record<string, unknown>;

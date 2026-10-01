@@ -5,6 +5,15 @@ import { act, cleanup, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useExitGuard, type UseExitGuardReturn } from '../hooks/useExitGuard';
 
+/**
+ * 🔑 칸 이동(뒤로가기 traversal) 흉내 — 가드가 감싼 replaceState 가 아니라 원래 것을 쓴다.
+ * 감싼 replaceState 는 «같은 칸 덮어쓰기» 에서 sentinel 표식을 옮겨 적는다(2026-10-01). 칸 이동은 replace 가 아니므로
+ * 표식이 따라오면 안 된다 — jsdom 에는 진짜 traversal 이 없어 state 를 바꿔 끼우는 것으로 흉내 낸다.
+ */
+function travel(data: unknown, unused: string, url?: string) {
+  History.prototype.replaceState.call(window.history, data, unused, url);
+}
+
 const SENTINEL_KEY = '__tmExitGuard';
 
 // useExitGuard 반환값을 인스턴스별로 캡처(여러 인스턴스 테스트 지원).
@@ -31,7 +40,7 @@ function dispatchPopState() {
   act(() => {
     const below = { ...(window.history.state ?? {}) } as Record<string, unknown>;
     delete below[SENTINEL_KEY];
-    window.history.replaceState(below, '', window.location.href);
+    travel(below, '', window.location.href);
     window.dispatchEvent(new PopStateEvent('popstate', { state: below }));
   });
 }
@@ -51,7 +60,7 @@ type ExitGuardWindow = { __tmExitGuardOwners?: Set<string>; __tmExitGuardSeq?: n
 beforeEach(() => {
   guards = {};
   // 깨끗한 현재 entry + window-global 소유권 레지스트리/seq 리셋(테스트 결정성).
-  window.history.replaceState({}, '', window.location.href);
+  travel({}, '', window.location.href);
   (window as unknown as ExitGuardWindow).__tmExitGuardOwners = new Set();
   (window as unknown as ExitGuardWindow).__tmExitGuardSeq = 0;
   pushSpy = vi.spyOn(window.history, 'pushState'); // call-through(실제 push로 state 반영).
@@ -70,7 +79,7 @@ describe('useExitGuard — §9.H-18 v2.4 한 칸 뒤로 (2026-09-28)', () => {
     const sentinelState = window.history.state;
     window.history.pushState({ idx: 1 }, '', window.location.href); // 다음 단계로 push
     act(() => {
-      window.history.replaceState(sentinelState, '', window.location.href); // 뒤로가기 = sentinel 칸에 선다
+      travel(sentinelState, '', window.location.href); // 뒤로가기 = sentinel 칸에 선다
       window.dispatchEvent(new PopStateEvent('popstate', { state: sentinelState }));
     });
     expect(guards.a.promptOpen).toBe(false);
@@ -186,7 +195,7 @@ describe('useExitGuard — sentinel 생명주기 계약 (SC-T1~T24)', () => {
     rerender(<Probe when={false} />); // 저장 → disarm(소유권은 Plan대로 유지).
     // disarm 중 사용자가 Back → sentinel이 소비돼 현재 entry에서 마커가 사라진 상태 모사.
     act(() => {
-      window.history.replaceState({}, '', window.location.href);
+      travel({}, '', window.location.href);
     });
     dispatchPopState(); // when=false → no-op(가드 안 함, 정상).
     expect(guards.a.promptOpen).toBe(false);
@@ -527,7 +536,7 @@ describe('useExitGuard — sentinel 생명주기 계약 (SC-T1~T24)', () => {
     expect(window.location.search).toContain('dest=1');
     // 늦게 도착한 브라우저 traversal이 URL을 목적지에서 옮긴 상황 모사.
     act(() => {
-      window.history.replaceState({}, '', base);
+      travel({}, '', base);
     });
     dispatchPopState(); // late popstate → best-effort 복원.
     expect(nav).toHaveBeenCalledTimes(1); // cb는 여전히 1회.
@@ -601,7 +610,7 @@ describe('useExitGuard — sentinel 생명주기 계약 (SC-T1~T24)', () => {
     });
     // 이후 사용자의 무관한 네비게이션이 URL을 옮기고 popstate 발생.
     act(() => {
-      window.history.replaceState({}, '', base);
+      travel({}, '', base);
     });
     dispatchPopState();
     expect(nav).toHaveBeenCalledTimes(1);
@@ -626,7 +635,7 @@ describe('useExitGuard — sentinel 생명주기 계약 (SC-T1~T24)', () => {
     expect(window.location.search).toContain('dest=2');
     // 언마운트 후 늦게 도착한 traversal이 URL을 옮긴 상황 — release 흡수 컨트롤러가 생존해 복원해야 함.
     act(() => {
-      window.history.replaceState({}, '', base);
+      travel({}, '', base);
     });
     dispatchPopState(); // late popstate(언마운트 이후).
     expect(nav).toHaveBeenCalledTimes(1);
@@ -789,5 +798,64 @@ describe('useExitGuard — sentinel 생명주기 계약 (SC-T1~T24)', () => {
       </StrictMode>,
     );
     expect(sentinelPushCount(pushSpy)).toBe(1); // 재마운트 시 marker===uid 재소유(재push 0).
+  });
+});
+
+describe('useExitGuard — 같은 칸 replace 는 표식을 지우지 못한다 (2026-10-01 brand 퍼스널컬러)', () => {
+  it('RC1: 라우터식 replace(state 통째 새로 씀) 뒤에도 sentinel 칸에 표식이 남고, 위 칸에서 내려오면 확인창이 없다', () => {
+    render(<Probe when={true} />);
+    const uid = (window.history.state as Record<string, unknown>)[SENTINEL_KEY];
+    expect(typeof uid).toBe('string');
+    act(() => {
+      window.history.replaceState({ usr: null, key: 'k1', idx: 0 }, '', '?at=method'); // navigate(?at=, {replace:true})
+    });
+    expect((window.history.state as Record<string, unknown>)[SENTINEL_KEY]).toBe(uid);
+    expect((window.history.state as Record<string, unknown>).key).toBe('k1'); // 라우터 state 는 그대로
+    const sentinelState = window.history.state;
+    window.history.pushState({ usr: null, key: 'k2', idx: 1 }, '', '?at=precheck'); // 위 칸
+    expect((window.history.state as Record<string, unknown>)[SENTINEL_KEY]).toBeUndefined(); // push 는 옮기지 않는다
+    act(() => {
+      travel(sentinelState, '', '?at=method'); // 뒤로가기 = sentinel 칸에 선다
+      window.dispatchEvent(new PopStateEvent('popstate', { state: sentinelState }));
+    });
+    expect(guards.a.promptOpen).toBe(false);
+    dispatchPopState(); // 그 아래로 = 진짜 나가기
+    expect(guards.a.promptOpen).toBe(true);
+  });
+
+  it('RC2: 표식 키를 적은 replace(지우기·바꾸기)는 건드리지 않는다', () => {
+    render(<Probe when={true} />);
+    act(() => {
+      window.history.replaceState({ idx: 0, [SENTINEL_KEY]: undefined }, '', window.location.href);
+    });
+    expect((window.history.state as Record<string, unknown>)[SENTINEL_KEY]).toBeUndefined();
+  });
+
+  it('RC3: 가드가 내려간 뒤(레지스트리에서 빠짐)에는 replace 가 옛 표식을 옮기지 않는다', () => {
+    const { unmount } = render(<Probe when={true} />);
+    unmount();
+    act(() => {
+      window.history.replaceState({ idx: 0 }, '', window.location.href);
+    });
+    expect((window.history.state as Record<string, unknown>)[SENTINEL_KEY]).toBeUndefined();
+  });
+
+  it('RC4: replaceState 는 window 당 한 번만 감싼다(가드가 여럿·다시 무장해도 겹겹이 안 쌓인다)', () => {
+    const { rerender } = render(<Probe when={true} />);
+    const wrapped = window.history.replaceState;
+    expect(wrapped).not.toBe(History.prototype.replaceState);
+    rerender(<Probe when={false} />);
+    rerender(<Probe when={true} />);
+    render(<Probe id="b" when={true} />);
+    expect(window.history.replaceState).toBe(wrapped);
+  });
+
+  it('RC5: null state 로 replace 해도 표식은 남는다', () => {
+    render(<Probe when={true} />);
+    const uid = (window.history.state as Record<string, unknown>)[SENTINEL_KEY];
+    act(() => {
+      window.history.replaceState(null, '', window.location.href);
+    });
+    expect((window.history.state as Record<string, unknown>)[SENTINEL_KEY]).toBe(uid);
   });
 });
