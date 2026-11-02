@@ -84,6 +84,13 @@ function deferred(): Array<() => void> {
   return w[DEFERRED_KEY] as Array<() => void>;
 }
 
+/**
+ * 창 밖(useExitGuard 의 쌍둥이 건너뛰기)이 back() 을 부를 때도 같은 줄에 선다 — 그 back 이 오기 전에 새 창이 칸을 쌓으면
+ * back 이 새 창의 칸을 치워 창이 곧바로 닫힌다(codex 2026-11-03). 패키지 안에서만 쓴다(index 로 내보내지 않는다).
+ */
+export function beginSharedBack(): void { beginOwnBack(); }
+export function endSharedBack(): void { endOwnBack(); }
+
 /** 우리가 back() 을 부른다 — 그 popstate 가 올 때까지 새 창은 칸을 쌓지 않는다. */
 function beginOwnBack() {
   globals()[PENDING_KEY] = pendingBacks() + 1;

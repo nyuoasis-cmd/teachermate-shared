@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { isBackConsumed } from './useBackClosable.js';
+import { beginSharedBack, endSharedBack, isBackConsumed } from './useBackClosable.js';
 
 /**
  * useExitGuard — 브라우저/하드웨어 뒤로가기로 앱 밖 이탈을 막는 라우터-무관 표준 훅.
@@ -65,6 +65,14 @@ function getRegistry(): Set<string> {
  * - window 당 한 번만 감싼다. 번들·버전이 달라도 같은 플래그를 본다.
  */
 const REPLACE_CARRY_KEY = '__tmExitGuardReplaceCarry';
+/** replace 로 덮인 sentinel 의 uid — 그 칸은 더는 «원래 칸의 쌍둥이» 가 아니다(주소·state 가 바뀌었다 · codex 2026-11-03 P1). */
+const TWIN_BROKEN_KEY = '__tmExitGuardTwinBroken';
+function twinBroken(): Set<string> {
+  if (typeof window === 'undefined') return new Set<string>();
+  const w = window as unknown as { [TWIN_BROKEN_KEY]?: Set<string> };
+  if (!w[TWIN_BROKEN_KEY]) w[TWIN_BROKEN_KEY] = new Set<string>();
+  return w[TWIN_BROKEN_KEY] as Set<string>;
+}
 
 function isPlainStateObject(value: unknown): value is Record<string, unknown> {
   if (typeof value !== 'object' || value === null) return false;
@@ -80,6 +88,7 @@ function installReplaceCarry(): void {
   const replaceState = function replaceState(this: History, data: unknown, unused: string, url?: string | URL | null) {
     const marker = (window.history.state as Record<string, unknown> | null | undefined)?.[SENTINEL_KEY];
     if (typeof marker === 'string' && getRegistry().has(marker)) {
+      twinBroken().add(marker); // 칸 내용이 바뀐다 — 아래 칸과의 쌍둥이 관계는 끝났다(건너뛰기 금지 · 옛 bounded stale 로 돌아간다)
       if (data === null || data === undefined) {
         data = { [SENTINEL_KEY]: marker };
       } else if (isPlainStateObject(data) && !(SENTINEL_KEY in data)) {
@@ -148,12 +157,21 @@ function readSentinelMarker(): unknown {
   return (window.history.state as Record<string, unknown> | null | undefined)?.[SENTINEL_KEY];
 }
 
-/** sentinel 을 뺀 state 의 지문 — sentinel 칸과 그 «쌍둥이»(바로 아래 원래 칸)를 알아보는 데 쓴다. */
-function twinPrint(state: unknown): string {
-  if (!isPlainStateObject(state)) return JSON.stringify(state ?? null);
-  const rest: Record<string, unknown> = { ...state };
-  delete rest[SENTINEL_KEY];
-  try { return JSON.stringify(rest); } catch { return ''; }
+/**
+ * sentinel 을 뺀 state 의 지문 — sentinel 칸과 그 «쌍둥이»(바로 아래 원래 칸)를 알아보는 데 쓴다.
+ * 🔑 라우터가 칸마다 새로 주는 고유 `key`(문자열)가 있을 때만 지문을 낸다(react-router). 그래야 «같은 주소 · 같은 state 인
+ *    다른 칸» 이 생길 수 없다(codex 2026-11-03 P2 — 앞으로가기 · 같은 state push 오판). key 가 없거나 직렬화가 안 되면 null =
+ *    비교하지 않는다(건너뛰지 않고 옛 bounded stale 그대로).
+ */
+function twinPrint(state: unknown): string | null {
+  try {
+    if (!isPlainStateObject(state) || typeof state.key !== 'string' || state.key === '') return null;
+    const rest: Record<string, unknown> = { ...state };
+    delete rest[SENTINEL_KEY];
+    return JSON.stringify(rest);
+  } catch {
+    return null;
+  }
 }
 
 export function useExitGuard(opts: UseExitGuardOptions): UseExitGuardReturn {
@@ -181,6 +199,20 @@ export function useExitGuard(opts: UseExitGuardOptions): UseExitGuardReturn {
   const twinRef = useRef<{ href: string; print: string } | null>(null);
   // 쌍둥이 건너뛰기 back() 이 낳을 popstate 를 한 번 흡수한다(가드 판정에 넣지 않는다).
   const absorbSkipRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** 흡수를 끝낸다 — 창 줄(beginSharedBack)도 같이 푼다. 두 번 불려도 한 번만 푼다. */
+  const endAbsorb = useCallback(() => {
+    if (absorbSkipRef.current === null) return;
+    clearTimeout(absorbSkipRef.current);
+    absorbSkipRef.current = null;
+    endSharedBack();
+  }, []);
+  /** sentinel 을 새로 깔기 직전 — 이 칸이 새 쌍둥이의 원본이다. 남은 흡수 표식은 버린다(진짜 뒤로가기를 삼키지 않게 · codex P2). */
+  const noteTwinBeforePush = useCallback(() => {
+    endAbsorb();
+    const print = twinPrint(window.history.state);
+    twinRef.current = print === null ? null : { href: window.location.href, print };
+    twinBroken().delete(uidRef.current);
+  }, [endAbsorb]);
 
   useEffect(() => {
     onConfirmExitRef.current = onConfirmExit;
@@ -208,7 +240,7 @@ export function useExitGuard(opts: UseExitGuardOptions): UseExitGuardReturn {
       return;
     }
     // 마커 없음 또는 stale(레지스트리에 없는 문자열) → 내 sentinel을 1회 push해 소유.
-    twinRef.current = { href: window.location.href, print: twinPrint(window.history.state) };
+    noteTwinBeforePush();
     window.history.pushState(
       { ...window.history.state, [SENTINEL_KEY]: uidRef.current },
       '',
@@ -216,7 +248,7 @@ export function useExitGuard(opts: UseExitGuardOptions): UseExitGuardReturn {
     );
     ownsSentinelRef.current = true;
     registry.add(uidRef.current);
-  }, []);
+  }, [noteTwinBeforePush]);
 
   /**
    * serializedRelease — confirmExit·releaseAndNavigate 공용 프리미티브.
@@ -395,8 +427,7 @@ export function useExitGuard(opts: UseExitGuardOptions): UseExitGuardReturn {
   const onPopState = useCallback((event?: PopStateEvent) => {
     // 쌍둥이 건너뛰기가 부른 back() 의 도착 — 가드 판정에 넣지 않는다. 도착한 칸에서 가드가 켜져 있으면 다시 깐다.
     if (absorbSkipRef.current !== null) {
-      clearTimeout(absorbSkipRef.current);
-      absorbSkipRef.current = null;
+      endAbsorb();
       scheduleRearm();
       return;
     }
@@ -410,6 +441,7 @@ export function useExitGuard(opts: UseExitGuardOptions): UseExitGuardReturn {
       if (
         ownsSentinelRef.current &&
         twin !== null &&
+        !twinBroken().has(uidRef.current) &&
         readSentinelMarker() !== uidRef.current &&
         window.location.href === twin.href &&
         twinPrint(window.history.state) === twin.print
@@ -417,7 +449,8 @@ export function useExitGuard(opts: UseExitGuardOptions): UseExitGuardReturn {
         ownsSentinelRef.current = false; // 위에 남은 sentinel 칸은 앞으로가기 쪽으로 밀려났다 — 더는 내 것으로 보지 않는다.
         getRegistry().delete(uidRef.current);
         twinRef.current = null;
-        absorbSkipRef.current = setTimeout(() => { absorbSkipRef.current = null; }, SKIP_TWIN_ABSORB_MS);
+        beginSharedBack(); // 창(useBackClosable)과 같은 줄 — 이 back 이 오기 전에는 새 창이 칸을 쌓지 않는다(codex P2)
+        absorbSkipRef.current = setTimeout(() => { absorbSkipRef.current = null; endSharedBack(); }, SKIP_TWIN_ABSORB_MS);
         window.history.back();
       }
       return;
@@ -429,13 +462,13 @@ export function useExitGuard(opts: UseExitGuardOptions): UseExitGuardReturn {
     if (readSentinelMarker() === uidRef.current) return;
     // 소유 + 가드 활성 상태에서의 뒤로가기 → 모달 + sentinel 재push(정확히 1개)로 잔류.
     setPromptOpen(true);
-    twinRef.current = { href: window.location.href, print: twinPrint(window.history.state) };
+    noteTwinBeforePush();
     window.history.pushState(
       { ...window.history.state, [SENTINEL_KEY]: uidRef.current },
       '',
       window.location.href,
     );
-  }, [scheduleRearm]);
+  }, [scheduleRearm, endAbsorb, noteTwinBeforePush]);
 
   const onBeforeUnload = useCallback((event: BeforeUnloadEvent) => {
     if (releasedRef.current) return; // 동기 disarm — confirmed-exit cb가 location.assign해도 이중 프롬프트 0(SC-T8).
@@ -457,12 +490,12 @@ export function useExitGuard(opts: UseExitGuardOptions): UseExitGuardReturn {
       // 언마운트 cleanup(항목 6): listener/레지스트리만 정리. history.back() 절대 금지 → bounded stale 1개 수용.
       // (StrictMode 가짜 언마운트도 동일 — remount 시 arm()이 marker===uid를 보고 재push 없이 재소유.)
       if (rearmTimerRef.current !== undefined) clearTimeout(rearmTimerRef.current);
-      if (absorbSkipRef.current !== null) { clearTimeout(absorbSkipRef.current); absorbSkipRef.current = null; }
+      endAbsorb();
       getRegistry().delete(uidRef.current);
       ownsSentinelRef.current = false;
       mountedRef.current = false; // 이후 cb 실패 복구가 죽은 인스턴스를 재arm하지 않도록(codex R5).
     };
-  }, [onPopState, onBeforeUnload]);
+  }, [onPopState, onBeforeUnload, endAbsorb]);
 
   // arm/disarm — when 전이에만 반응. idempotent(소유 중이면 재push 금지).
   useEffect(() => {

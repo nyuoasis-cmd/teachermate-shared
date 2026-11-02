@@ -197,12 +197,9 @@ describe('useExitGuard — sentinel 생명주기 계약 (SC-T1~T24)', () => {
     act(() => {
       travel({}, '', window.location.href);
     });
-    dispatchPopState(); // when=false → 가드 안 함. 쌍둥이 칸이라 한 칸 더 이어 준다(0.15.3 · TW1).
+    dispatchPopState(); // when=false → no-op(가드 안 함, 정상). 라우터 key 가 없는 state 라 쌍둥이 건너뛰기도 안 한다(TW 참조).
     expect(guards.a.promptOpen).toBe(false);
-    expect(backSpy).toHaveBeenCalledTimes(1);
-    // 그 back() 의 도착(jsdom 에는 진짜 traversal 이 없어 손으로 보낸다) — 흡수된다.
-    act(() => { window.dispatchEvent(new PopStateEvent('popstate', { state: window.history.state })); });
-    expect(guards.a.promptOpen).toBe(false);
+    expect(backSpy).not.toHaveBeenCalled();
     expect((window.history.state as Record<string, unknown>)[SENTINEL_KEY]).toBeUndefined(); // 마커 없음.
     // 다시 편집 → 재arm. owns=true지만 마커가 없으므로 idempotent skip 안 하고 새 sentinel push.
     const before = sentinelPushCount(pushSpy);
@@ -865,6 +862,8 @@ describe('useExitGuard — 같은 칸 replace 는 표식을 지우지 못한다 
 });
 
 describe('useExitGuard — 남은 sentinel 의 쌍둥이 칸 (0.15.3 · 2026-11-03 devlab 후속)', () => {
+  // 🔑 쌍둥이 건너뛰기는 라우터가 칸마다 주는 고유 key 가 있을 때만 한다 — react-router 모양 state 로 시작한다.
+  beforeEach(() => { travel({ usr: null, key: 'k0', idx: 0 }, '', window.location.pathname); });
   /** 사용자 뒤로가기로 «sentinel 바로 아래 원래 칸» 에 내려선다 — 같은 주소 · 표식만 빠진 같은 state. */
   const stepToTwin = () => dispatchPopState();
   /** skip back() 의 도착을 흉내 — 한 칸 더 아래(다른 화면). */
@@ -872,6 +871,7 @@ describe('useExitGuard — 남은 sentinel 의 쌍둥이 칸 (0.15.3 · 2026-11-
     travel(state, '', url);
     window.dispatchEvent(new PopStateEvent('popstate', { state }));
   });
+  const pending = () => (window as unknown as { __tmBackClosablePending?: number }).__tmBackClosablePending ?? 0;
 
   it('TW1: 가드가 sentinel 위에서 꺼진 뒤 뒤로가기로 쌍둥이 칸에 서면 history.back 을 한 번 더 부른다(화면이 안 바뀐 한 번을 이어 준다)', () => {
     const { rerender } = render(<Probe when={true} />);
@@ -887,13 +887,14 @@ describe('useExitGuard — 남은 sentinel 의 쌍둥이 칸 (0.15.3 · 2026-11-
     const { rerender } = render(<Probe when={true} />);
     rerender(<Probe when={false} />);
     stepToTwin();
-    rerender(<Probe when={true} />); // 도착한 칸(이전 화면)도 가드가 켜지는 화면이다
     const before = sentinelPushCount(pushSpy);
-    arriveBelow({ idx: 0 });
-    expect(guards.a.promptOpen).toBe(false); // 흡수 — 확인창을 띄우지 않는다
+    // 실제 순서: popstate 처리기(흡수)가 먼저 돌고, 그 뒤 도착한 칸이 그려지며 가드가 켜진다
+    arriveBelow({ usr: null, key: 'k-prev', idx: 0 });
+    expect(guards.a.promptOpen).toBe(false);
+    rerender(<Probe when={true} />);
     act(() => { vi.advanceTimersByTime(100); });
-    expect(sentinelPushCount(pushSpy)).toBe(before + 1); // 다시 깔았다
-    dispatchPopState(); // 이제 진짜 뒤로가기는 다시 막힌다
+    expect(sentinelPushCount(pushSpy)).toBe(before + 1); // 정확히 한 장 다시 깔았다(재무장 효과 · 예약 재무장이 겹쳐 두 장이 되지 않는다)
+    dispatchPopState();
     expect(guards.a.promptOpen).toBe(true);
   });
 
@@ -904,15 +905,25 @@ describe('useExitGuard — 남은 sentinel 의 쌍둥이 칸 (0.15.3 · 2026-11-
     stepToTwin();
     act(() => { vi.advanceTimersByTime(500); });
     rerender(<Probe when={true} />);
-    act(() => { vi.advanceTimersByTime(100); });
     dispatchPopState();
     expect(guards.a.promptOpen).toBe(true);
+  });
+
+  it('TW3b: 흡수 표식이 살아 있는 동안 다시 무장하면 표식을 버린다 — 바로 이어진 진짜 뒤로가기도 확인창이다(codex P2)', () => {
+    vi.useFakeTimers();
+    const { rerender } = render(<Probe when={true} />);
+    rerender(<Probe when={false} />);
+    stepToTwin(); // back() 이 움직일 곳이 없어 도착이 안 오는 경우
+    rerender(<Probe when={true} />); // 400ms 안에 다시 무장 — 새 sentinel push
+    dispatchPopState(); // 진짜 뒤로가기
+    expect(guards.a.promptOpen).toBe(true);
+    expect(pending()).toBe(0); // 창 줄도 풀었다
   });
 
   it('TW4: 가드가 꺼진 채 sentinel 칸에 «위에서» 내려선 것(다음 화면 → 첫 화면)은 쌍둥이가 아니다 — 부르지 않는다', () => {
     const { rerender } = render(<Probe when={true} />);
     const sentinelState = window.history.state;
-    window.history.pushState({ idx: 1 }, '', window.location.href); // 다음 화면
+    window.history.pushState({ usr: null, key: 'k1', idx: 1 }, '', window.location.href);
     rerender(<Probe when={false} />);
     act(() => {
       travel(sentinelState, '', window.location.href);
@@ -924,14 +935,14 @@ describe('useExitGuard — 남은 sentinel 의 쌍둥이 칸 (0.15.3 · 2026-11-
   it('TW5: 아래 칸의 state 가 다르면(다른 화면) 쌍둥이가 아니다 — 부르지 않는다', () => {
     const { rerender } = render(<Probe when={true} />);
     rerender(<Probe when={false} />);
-    arriveBelow({ idx: 7, key: 'other' });
+    arriveBelow({ usr: null, key: 'other', idx: 7 });
     expect(backSpy).not.toHaveBeenCalled();
   });
 
   it('TW6: 아래 칸의 주소가 다르면 쌍둥이가 아니다 — 부르지 않는다', () => {
     const { rerender } = render(<Probe when={true} />);
     rerender(<Probe when={false} />);
-    arriveBelow({}, `${window.location.pathname}?other=1`);
+    arriveBelow({ usr: null, key: 'k0', idx: 0 }, `${window.location.pathname}?other=1`);
     expect(backSpy).not.toHaveBeenCalled();
     travel({}, '', window.location.pathname);
   });
@@ -947,7 +958,7 @@ describe('useExitGuard — 남은 sentinel 의 쌍둥이 칸 (0.15.3 · 2026-11-
     const { rerender } = render(<Probe when={true} />);
     rerender(<Probe when={false} />);
     stepToTwin();
-    arriveBelow({ idx: 0 }); // 도착(흡수)
+    arriveBelow({ usr: null, key: 'k-prev', idx: 0 });
     stepToTwin();
     expect(backSpy).toHaveBeenCalledTimes(1);
   });
@@ -955,8 +966,43 @@ describe('useExitGuard — 남은 sentinel 의 쌍둥이 칸 (0.15.3 · 2026-11-
   it('TW9: passive(비소유) 인스턴스는 건너뛰지 않는다', () => {
     const { rerender } = render(<><Probe id="a" when={true} /><Probe id="b" when={true} /></>);
     rerender(<><Probe id="a" when={true} /><Probe id="b" when={false} /></>);
-    stepToTwin(); // a 는 켜져 있어 확인창 · b 는 소유자가 아니라 아무것도 안 한다
+    stepToTwin();
     expect(backSpy).not.toHaveBeenCalled();
     expect(guards.a.promptOpen).toBe(true);
+  });
+
+  it('TW10: sentinel 칸이 replace 로 다른 화면이 되면 쌍둥이 관계는 끝난다 — 아래 원래 칸으로 내려와도 건너뛰지 않는다(codex P1)', () => {
+    const { rerender } = render(<Probe when={true} />);
+    const below = { usr: null, key: 'k0', idx: 0 };
+    act(() => { window.history.replaceState({ usr: null, key: 'kB', idx: 0 }, '', `${window.location.pathname}?b=1`); }); // /A → /B replace
+    rerender(<Probe when={false} />);
+    arriveBelow(below, window.location.pathname); // 뒤로가기 → /A(원래 칸)
+    expect(backSpy).not.toHaveBeenCalled();
+  });
+
+  it('TW11: 라우터 key 가 없는 state 는 비교하지 않는다 — 같은 주소 · 같은 state 인 다른 칸을 오판하지 않는다(codex P2)', () => {
+    travel({}, '', window.location.pathname);
+    const { rerender } = render(<Probe when={true} />);
+    rerender(<Probe when={false} />);
+    stepToTwin();
+    expect(backSpy).not.toHaveBeenCalled();
+  });
+
+  it('TW12: 직렬화할 수 없는 state(BigInt)도 가드를 깨지 않고 비교만 건너뛴다(codex P2)', () => {
+    travel({ usr: { n: BigInt(1) }, key: 'k0', idx: 0 }, '', window.location.pathname);
+    const { rerender } = render(<Probe when={true} />);
+    expect(sentinelPushCount(pushSpy)).toBe(1);
+    rerender(<Probe when={false} />);
+    stepToTwin();
+    expect(backSpy).not.toHaveBeenCalled();
+  });
+
+  it('TW13: 건너뛰는 back 은 창 줄에 선다(오는 동안 새 창은 칸을 안 쌓는다) · 도착하면 줄을 푼다(codex P2)', () => {
+    const { rerender } = render(<Probe when={true} />);
+    rerender(<Probe when={false} />);
+    stepToTwin();
+    expect(pending()).toBe(1);
+    arriveBelow({ usr: null, key: 'k-prev', idx: 0 });
+    expect(pending()).toBe(0);
   });
 });
