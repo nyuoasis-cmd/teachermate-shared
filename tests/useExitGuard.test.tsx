@@ -197,7 +197,11 @@ describe('useExitGuard — sentinel 생명주기 계약 (SC-T1~T24)', () => {
     act(() => {
       travel({}, '', window.location.href);
     });
-    dispatchPopState(); // when=false → no-op(가드 안 함, 정상).
+    dispatchPopState(); // when=false → 가드 안 함. 쌍둥이 칸이라 한 칸 더 이어 준다(0.15.3 · TW1).
+    expect(guards.a.promptOpen).toBe(false);
+    expect(backSpy).toHaveBeenCalledTimes(1);
+    // 그 back() 의 도착(jsdom 에는 진짜 traversal 이 없어 손으로 보낸다) — 흡수된다.
+    act(() => { window.dispatchEvent(new PopStateEvent('popstate', { state: window.history.state })); });
     expect(guards.a.promptOpen).toBe(false);
     expect((window.history.state as Record<string, unknown>)[SENTINEL_KEY]).toBeUndefined(); // 마커 없음.
     // 다시 편집 → 재arm. owns=true지만 마커가 없으므로 idempotent skip 안 하고 새 sentinel push.
@@ -857,5 +861,102 @@ describe('useExitGuard — 같은 칸 replace 는 표식을 지우지 못한다 
       window.history.replaceState(null, '', window.location.href);
     });
     expect((window.history.state as Record<string, unknown>)[SENTINEL_KEY]).toBe(uid);
+  });
+});
+
+describe('useExitGuard — 남은 sentinel 의 쌍둥이 칸 (0.15.3 · 2026-11-03 devlab 후속)', () => {
+  /** 사용자 뒤로가기로 «sentinel 바로 아래 원래 칸» 에 내려선다 — 같은 주소 · 표식만 빠진 같은 state. */
+  const stepToTwin = () => dispatchPopState();
+  /** skip back() 의 도착을 흉내 — 한 칸 더 아래(다른 화면). */
+  const arriveBelow = (state: Record<string, unknown>, url = window.location.href) => act(() => {
+    travel(state, '', url);
+    window.dispatchEvent(new PopStateEvent('popstate', { state }));
+  });
+
+  it('TW1: 가드가 sentinel 위에서 꺼진 뒤 뒤로가기로 쌍둥이 칸에 서면 history.back 을 한 번 더 부른다(화면이 안 바뀐 한 번을 이어 준다)', () => {
+    const { rerender } = render(<Probe when={true} />);
+    rerender(<Probe when={false} />);
+    expect(backSpy).not.toHaveBeenCalled(); // 꺼지는 순간에는 부르지 않는다(SC-T6 그대로).
+    stepToTwin();
+    expect(backSpy).toHaveBeenCalledTimes(1);
+    expect(guards.a.promptOpen).toBe(false);
+  });
+
+  it('TW2: 건너뛴 back() 의 도착은 흡수한다 — 도착한 칸에서 가드가 켜져 있으면 확인창 대신 sentinel 을 다시 깐다', () => {
+    vi.useFakeTimers();
+    const { rerender } = render(<Probe when={true} />);
+    rerender(<Probe when={false} />);
+    stepToTwin();
+    rerender(<Probe when={true} />); // 도착한 칸(이전 화면)도 가드가 켜지는 화면이다
+    const before = sentinelPushCount(pushSpy);
+    arriveBelow({ idx: 0 });
+    expect(guards.a.promptOpen).toBe(false); // 흡수 — 확인창을 띄우지 않는다
+    act(() => { vi.advanceTimersByTime(100); });
+    expect(sentinelPushCount(pushSpy)).toBe(before + 1); // 다시 깔았다
+    dispatchPopState(); // 이제 진짜 뒤로가기는 다시 막힌다
+    expect(guards.a.promptOpen).toBe(true);
+  });
+
+  it('TW3: 흡수 표식은 잠깐만 산다 — back() 의 도착이 안 오면 버려서 다음 진짜 뒤로가기를 삼키지 않는다', () => {
+    vi.useFakeTimers();
+    const { rerender } = render(<Probe when={true} />);
+    rerender(<Probe when={false} />);
+    stepToTwin();
+    act(() => { vi.advanceTimersByTime(500); });
+    rerender(<Probe when={true} />);
+    act(() => { vi.advanceTimersByTime(100); });
+    dispatchPopState();
+    expect(guards.a.promptOpen).toBe(true);
+  });
+
+  it('TW4: 가드가 꺼진 채 sentinel 칸에 «위에서» 내려선 것(다음 화면 → 첫 화면)은 쌍둥이가 아니다 — 부르지 않는다', () => {
+    const { rerender } = render(<Probe when={true} />);
+    const sentinelState = window.history.state;
+    window.history.pushState({ idx: 1 }, '', window.location.href); // 다음 화면
+    rerender(<Probe when={false} />);
+    act(() => {
+      travel(sentinelState, '', window.location.href);
+      window.dispatchEvent(new PopStateEvent('popstate', { state: sentinelState }));
+    });
+    expect(backSpy).not.toHaveBeenCalled();
+  });
+
+  it('TW5: 아래 칸의 state 가 다르면(다른 화면) 쌍둥이가 아니다 — 부르지 않는다', () => {
+    const { rerender } = render(<Probe when={true} />);
+    rerender(<Probe when={false} />);
+    arriveBelow({ idx: 7, key: 'other' });
+    expect(backSpy).not.toHaveBeenCalled();
+  });
+
+  it('TW6: 아래 칸의 주소가 다르면 쌍둥이가 아니다 — 부르지 않는다', () => {
+    const { rerender } = render(<Probe when={true} />);
+    rerender(<Probe when={false} />);
+    arriveBelow({}, `${window.location.pathname}?other=1`);
+    expect(backSpy).not.toHaveBeenCalled();
+    travel({}, '', window.location.pathname);
+  });
+
+  it('TW7: 가드가 켜진 채 쌍둥이 칸에 서면 지금처럼 확인창이다(건너뛰지 않는다)', () => {
+    render(<Probe when={true} />);
+    stepToTwin();
+    expect(guards.a.promptOpen).toBe(true);
+    expect(backSpy).not.toHaveBeenCalled();
+  });
+
+  it('TW8: 쌍둥이 건너뛰기는 한 번뿐이다 — 같은 일이 또 와도 다시 부르지 않는다(소유를 내려놓았다)', () => {
+    const { rerender } = render(<Probe when={true} />);
+    rerender(<Probe when={false} />);
+    stepToTwin();
+    arriveBelow({ idx: 0 }); // 도착(흡수)
+    stepToTwin();
+    expect(backSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('TW9: passive(비소유) 인스턴스는 건너뛰지 않는다', () => {
+    const { rerender } = render(<><Probe id="a" when={true} /><Probe id="b" when={true} /></>);
+    rerender(<><Probe id="a" when={true} /><Probe id="b" when={false} /></>);
+    stepToTwin(); // a 는 켜져 있어 확인창 · b 는 소유자가 아니라 아무것도 안 한다
+    expect(backSpy).not.toHaveBeenCalled();
+    expect(guards.a.promptOpen).toBe(true);
   });
 });

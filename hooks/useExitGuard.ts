@@ -15,6 +15,9 @@ import { isBackConsumed } from './useBackClosable.js';
  *  - 단일 소유자(ownsSentinelRef): 한 entry의 sentinel은 한 인스턴스만 소유. passive 인스턴스는 popstate에서 완전 no-op.
  *  - history.back()은 오직 serializedRelease(confirmExit/releaseAndNavigate) 1군데서만 — 그것도 자기 sentinel을 소유할 때만.
  *  - 일반 disarm(when→false)·언마운트 cleanup은 절대 history.back() 안 함(이탈 의도 신호 없음 → bounded stale 수용).
+ *  - 예외 하나(2026-11-03 · 0.15.3): 가드가 꺼진 채 사용자가 뒤로가기로 내 sentinel 의 «쌍둥이 칸»(같은 주소 · 표식만 빠진
+ *    같은 state)에 내려서면, 화면이 안 바뀐 그 한 번을 대신해 history.back() 을 한 번 더 부른다(skipStaleTwin).
+ *    사용자의 뒤로가기에 «응답» 하는 것이라 이탈 의도 신호가 있다 — disarm 시점에 먼저 지우지 않는 이유는 SC-T6 참조.
  *  - terminal disarm 먼저, cb는 나중: releasedRef 동기 set → 가드 표면(popstate/rearm/beforeunload) 차단 → cb 정확히 1회.
  *  - 소유권 레지스트리는 window-global(번들/버전 간 공유) — 타 번들의 활성 sentinel을 덮어쓰지 않음(codex 버전-스큐).
  */
@@ -24,6 +27,8 @@ const SENTINEL_KEY = '__tmExitGuard';
 const RELEASE_FALLBACK_MS = 50;
 /** fallback이 cb를 실행한 뒤 late traversal popstate를 흡수하기 위해 listener를 유지하는 유예(ms). */
 const RELEASE_FALLBACK_GRACE_MS = 200;
+/** 쌍둥이 건너뛰기 back() 의 popstate 를 흡수하는 표식의 유효 시간(ms). 안 오면 표식을 버린다(진짜 뒤로가기를 삼키지 않게). */
+const SKIP_TWIN_ABSORB_MS = 400;
 /** 창이 가져간 뒤로가기 뒤, sentinel 이 사라졌는지 판단하기까지 기다리는 시간(ms). 창 정리 back() 연쇄를 기다린다. */
 const REARM_AFTER_CONSUMED_MS = 80;
 
@@ -143,6 +148,14 @@ function readSentinelMarker(): unknown {
   return (window.history.state as Record<string, unknown> | null | undefined)?.[SENTINEL_KEY];
 }
 
+/** sentinel 을 뺀 state 의 지문 — sentinel 칸과 그 «쌍둥이»(바로 아래 원래 칸)를 알아보는 데 쓴다. */
+function twinPrint(state: unknown): string {
+  if (!isPlainStateObject(state)) return JSON.stringify(state ?? null);
+  const rest: Record<string, unknown> = { ...state };
+  delete rest[SENTINEL_KEY];
+  try { return JSON.stringify(rest); } catch { return ''; }
+}
+
 export function useExitGuard(opts: UseExitGuardOptions): UseExitGuardReturn {
   const { when, onConfirmExit } = opts;
   const unloadWhen = opts.unloadWhen ?? when;
@@ -164,6 +177,10 @@ export function useExitGuard(opts: UseExitGuardOptions): UseExitGuardReturn {
   const releasedRef = useRef(false);
   // 컴포넌트 마운트 여부 — cb 실패 복구가 살아있는 인스턴스에만 적용되도록(async 컨텍스트 안전).
   const mountedRef = useRef(true);
+  // 내가 마지막으로 깐 sentinel 칸의 주소와 지문 — 쌍둥이 칸을 알아본다(skipStaleTwin).
+  const twinRef = useRef<{ href: string; print: string } | null>(null);
+  // 쌍둥이 건너뛰기 back() 이 낳을 popstate 를 한 번 흡수한다(가드 판정에 넣지 않는다).
+  const absorbSkipRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     onConfirmExitRef.current = onConfirmExit;
@@ -191,6 +208,7 @@ export function useExitGuard(opts: UseExitGuardOptions): UseExitGuardReturn {
       return;
     }
     // 마커 없음 또는 stale(레지스트리에 없는 문자열) → 내 sentinel을 1회 push해 소유.
+    twinRef.current = { href: window.location.href, print: twinPrint(window.history.state) };
     window.history.pushState(
       { ...window.history.state, [SENTINEL_KEY]: uidRef.current },
       '',
@@ -375,10 +393,35 @@ export function useExitGuard(opts: UseExitGuardOptions): UseExitGuardReturn {
   }, [armSentinel]);
 
   const onPopState = useCallback((event?: PopStateEvent) => {
+    // 쌍둥이 건너뛰기가 부른 back() 의 도착 — 가드 판정에 넣지 않는다. 도착한 칸에서 가드가 켜져 있으면 다시 깐다.
+    if (absorbSkipRef.current !== null) {
+      clearTimeout(absorbSkipRef.current);
+      absorbSkipRef.current = null;
+      scheduleRearm();
+      return;
+    }
     // 창(useBackClosable)이 이 뒤로가기를 가져갔다 — 창만 닫히고 나가기 확인은 안 띄운다(§9.H-18 v2.4 표 첫 줄).
     if (isBackConsumed(event)) { scheduleRearm(); return; }
     if (releasedRef.current) return; // release 후 추가 popstate no-op(SC-T9).
-    if (!whenRef.current) return; // disarm 상태(when=false) — 통과시킴(SC-T6).
+    if (!whenRef.current) {
+      // disarm 상태(when=false) — 통과시킴(SC-T6). 단, 남은 sentinel 의 «쌍둥이 칸» 에 내려섰으면(같은 주소 · 같은 state)
+      // 화면이 하나도 안 바뀐 뒤로가기다 → 사용자의 뒤로가기를 한 칸 더 이어 준다(§9.H-18 «여러 번 눌러야 움직이지 않는다»).
+      const twin = twinRef.current;
+      if (
+        ownsSentinelRef.current &&
+        twin !== null &&
+        readSentinelMarker() !== uidRef.current &&
+        window.location.href === twin.href &&
+        twinPrint(window.history.state) === twin.print
+      ) {
+        ownsSentinelRef.current = false; // 위에 남은 sentinel 칸은 앞으로가기 쪽으로 밀려났다 — 더는 내 것으로 보지 않는다.
+        getRegistry().delete(uidRef.current);
+        twinRef.current = null;
+        absorbSkipRef.current = setTimeout(() => { absorbSkipRef.current = null; }, SKIP_TWIN_ABSORB_MS);
+        window.history.back();
+      }
+      return;
+    }
     if (!ownsSentinelRef.current) return; // passive(비소유) — 완전 no-op(SC-T14).
     // 🔙 내 sentinel **위에** 섰다 = 더 위 칸(다음 단계·창)에서 첫 화면으로 한 칸 내려온 것이다. 나가려는 게 아니다.
     //    나가기는 sentinel **아래** 칸으로 내려갔을 때뿐이다(§9.H-18 v2.4 「한 칸 뒤로」). 라우터가 popstate 를
@@ -386,6 +429,7 @@ export function useExitGuard(opts: UseExitGuardOptions): UseExitGuardReturn {
     if (readSentinelMarker() === uidRef.current) return;
     // 소유 + 가드 활성 상태에서의 뒤로가기 → 모달 + sentinel 재push(정확히 1개)로 잔류.
     setPromptOpen(true);
+    twinRef.current = { href: window.location.href, print: twinPrint(window.history.state) };
     window.history.pushState(
       { ...window.history.state, [SENTINEL_KEY]: uidRef.current },
       '',
@@ -413,6 +457,7 @@ export function useExitGuard(opts: UseExitGuardOptions): UseExitGuardReturn {
       // 언마운트 cleanup(항목 6): listener/레지스트리만 정리. history.back() 절대 금지 → bounded stale 1개 수용.
       // (StrictMode 가짜 언마운트도 동일 — remount 시 arm()이 marker===uid를 보고 재push 없이 재소유.)
       if (rearmTimerRef.current !== undefined) clearTimeout(rearmTimerRef.current);
+      if (absorbSkipRef.current !== null) { clearTimeout(absorbSkipRef.current); absorbSkipRef.current = null; }
       getRegistry().delete(uidRef.current);
       ownsSentinelRef.current = false;
       mountedRef.current = false; // 이후 cb 실패 복구가 죽은 인스턴스를 재arm하지 않도록(codex R5).
